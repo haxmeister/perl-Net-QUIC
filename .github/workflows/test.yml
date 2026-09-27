@@ -32,6 +32,9 @@ jobs:
         with:
           perl-version: ${{ matrix.perl }}
 
+      - name: Install released Alien::ngtcp2 0.02
+        run: cpanm --notest https://github.com/haxmeister/perl-Alien-ngtcp2/archive/refs/tags/v0.020.tar.gz
+
       - name: Install dependencies
         run: cpanm --installdeps --notest .
 
@@ -53,6 +56,9 @@ jobs:
       - uses: shogo82148/actions-setup-perl@v1
         with:
           perl-version: "5.44"
+
+      - name: Install released Alien::ngtcp2 0.02
+        run: cpanm --notest https://github.com/haxmeister/perl-Alien-ngtcp2/archive/refs/tags/v0.020.tar.gz
 
       - name: Install dependencies
         run: cpanm --installdeps --notest .

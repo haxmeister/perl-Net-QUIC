@@ -1,0 +1,9 @@
+Revision history for Net-QUIC
+
+0.001_001  2026-09-27
+    - Begin the Net::QUIC implementation.
+    - Require Alien::ngtcp2 0.02.
+    - Link XS against libngtcp2 and the TLS helper selected by Alien::ngtcp2.
+    - Add native ngtcp2 version and crypto backend diagnostics.
+    - Add a small native crypto self-test.
+    - Keep the library event-loop neutral.

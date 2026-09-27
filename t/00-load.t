@@ -3,6 +3,8 @@ use warnings;
 
 use Test2::V0;
 
-use_ok 'Net::QUIC';
+use Net::QUIC;
+
+pass 'Net::QUIC loads';
 
 done_testing;

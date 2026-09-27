@@ -20,9 +20,34 @@ my $cflags = join ' ', grep { defined && length }
     Alien::ngtcp2->cflags,
     Alien::ngtcp2->crypto_cflags;
 
-my $libs = join ' ', grep { defined && length }
-    Alien::ngtcp2->libs,
-    Alien::ngtcp2->crypto_libs;
+sub _makemaker_libs {
+    my ($flags) = @_;
+
+    my @out;
+
+    for my $token (split /\s+/, $flags) {
+        next if !length $token;
+
+        if ($token =~ m{\A(.+)/([^/]+)\.(a|lib)\z}i) {
+            my ($dir, $name) = ($1, $2);
+
+            $name =~ s/\Alib//;
+
+            push @out, "-L$dir", "-l$name";
+            next;
+        }
+
+        push @out, $token;
+    }
+
+    return join ' ', @out;
+}
+
+my $libs = _makemaker_libs(
+    join ' ', grep { defined && length }
+        Alien::ngtcp2->libs,
+        Alien::ngtcp2->crypto_libs,
+);
 
 WriteMakefile(
     NAME             => 'Net::QUIC',

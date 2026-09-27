@@ -27,6 +27,8 @@ net_quic_crypto_backend(void)
 
 MODULE = Net::QUIC    PACKAGE = Net::QUIC
 
+PROTOTYPES: DISABLE
+
 const char *
 ngtcp2_version()
     PREINIT:

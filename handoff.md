@@ -79,6 +79,30 @@ Development version:
 
 0.001_001
 
+Current implementation head:
+
+cc5f1b652aa994f4119ee8d8cd58ce318bb673a9
+
+## Initial CI result
+
+The native foundation is green.
+
+GitHub Actions run 36357695943 passed all 15 jobs:
+
+- Linux: Perl 5.20, 5.22, 5.24, 5.26, 5.28, 5.30, 5.32, 5.34, 5.36,
+  5.38, 5.40, 5.42, and 5.44
+- macOS: Perl 5.44
+- Windows: Perl 5.44
+
+The Picotls fallback exposed one downstream build detail. Alien::ngtcp2 can
+return absolute static archive filenames in crypto_libs. ExtUtils::MakeMaker
+filters bare archive filenames out of LIBS, so Net::QUIC translates those
+filenames to equivalent -L and -l flags before passing them to MakeMaker.
+
+CI currently installs Alien::ngtcp2 from the released v0.020 GitHub tag because
+the CPAN module index was still advertising 0.01 immediately after the 0.02
+upload. The Net::QUIC Makefile itself still requires Alien::ngtcp2 0.02.
+
 ## Important upstream baseline
 
 Alien::ngtcp2 0.02 requires system libngtcp2 1.25.0 or newer and bundles
@@ -107,6 +131,23 @@ The next questions should center on:
 
 Do not add HTTP/3 behavior to the first QUIC transport layer while this API is
 being defined.
+
+## TLS implementation note
+
+The public Perl API should remain provider neutral.
+
+The native implementation will need a small private provider layer because TLS
+session creation differs:
+
+- OpenSSL uses SSL plus ngtcp2_crypto_ossl_ctx.
+- GnuTLS uses gnutls_session_t directly.
+- Picotls uses ngtcp2_crypto_picotls_ctx plus a ptls_t session.
+- BoringSSL and wolfSSL need their own private setup when those Alien providers
+  are selected.
+
+After the TLS session is attached to ngtcp2_conn, the QUIC packet, stream, and
+expiry APIs are common. Keep these provider branches below the Perl API instead
+of creating OpenSSL-, GnuTLS-, or Picotls-specific Perl classes.
 
 ## Repository hygiene
 

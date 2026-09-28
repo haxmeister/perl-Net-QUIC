@@ -23,6 +23,7 @@ my $client = Net::QUIC::Endpoint->client(
     peer        => $server_local,
     alpn        => $alpn,
     server_name => 'localhost',
+    ca_file     => $cert_file,
 );
 
 my $initial = $client->next_datagram;

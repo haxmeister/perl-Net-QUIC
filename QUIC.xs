@@ -945,7 +945,7 @@ _next_datagram(self)
             );
         }
 
-next_datagram_done:
+        next_datagram_done:
         ;
     OUTPUT:
         RETVAL

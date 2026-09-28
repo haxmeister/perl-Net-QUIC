@@ -408,10 +408,12 @@ This is still an early server API. Finished Connections are retired
 automatically after QUIC's closing or draining period, and all of their CID
 routes are removed from the Endpoint at the same time.
 
-Stateless reset policy for unknown connection IDs and shared server TLS
-credential state are not implemented yet. Server certificate and private-key
-files are currently loaded for each new connection rather than shared through
-one server TLS context.
+Server certificate and private-key files are loaded once when the Endpoint is
+constructed. Accepted Connections create their own Picotls sessions from that
+shared server TLS context instead of reopening or reparsing the credential
+files. Connections retain the shared context for as long as they need it.
+
+Stateless reset policy for unknown connection IDs is not implemented yet.
 
 =head2 connection
 

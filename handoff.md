@@ -2,19 +2,19 @@
 
 ## Current branch
 
-feature/connection-retirement
+feature/shared-server-tls-context
 
 Current main baseline:
 
-5f8f85991feda3c1f8d6f87e8341e163115bbbcc
+0a11e291e03ee49c98a68033406d2366d30f373e
 
 Immediate branch scope:
 
-- retire finished Connections automatically
-- remove every CID route owned by a retired server Connection
-- keep the existing Endpoint receive/send/timer contract
-- expose a simple Connection close lifecycle
-- preserve QUIC closing and draining timing instead of destroying state early
+- load server certificate and private-key state once per Endpoint
+- share one Picotls server credential context across accepted Connections
+- keep each Connection's Picotls session independent
+- keep the shared context alive for any Connection that still references it
+- preserve the existing public Endpoint API
 
 Baseline before the Picotls-only cleanup:
 
@@ -336,9 +336,6 @@ extra Retry round trip unless they request it.
 
 Server work still needed before calling this production-ready:
 
-- automatic retirement/removal of closed Connections and their routes
-- one shared server TLS credential/context setup instead of loading the
-  certificate and private key separately for every new Connection
 - stateless-reset policy for unknown connection IDs
 
 Client certificate verification is now implemented on
@@ -402,15 +399,41 @@ Lifecycle behavior now is:
 - the close packet reuses the existing per-Connection transmit buffer, so this
   feature does not add a second large packet buffer to every Connection
 
+Shared server TLS credential/context state is now implemented on
+feature/shared-server-tls-context.
+
+Code-bearing checkpoint:
+
+- head: b97c2c2bab4e296ba1671daceb140d4b9de945e5
+- GitHub Actions run: 36496762568
+- full 15-job matrix: PASS
+- 11 test files / 136 tests
+- Linux Perl 5.20 through 5.44: PASS
+- macOS: PASS
+- Windows: PASS
+
+Server TLS behavior now is:
+
+- Endpoint->server loads and parses the certificate and private key once
+- the Endpoint owns one private native Picotls server credential context
+- each accepted Connection creates its own ptls_server_new session from that
+  shared context
+- Connections retain an independent Perl reference to the shared TLS object,
+  so they remain safe even if the caller or Endpoint releases another reference
+- the credential files are not reopened or reparsed for each accepted client
+- tests delete both credential files immediately after Endpoint construction
+  and still complete two independent client handshakes
+- invalid certificate or private-key paths fail during Endpoint construction
+- no public API change was required
+
 Next:
 
-1. Add shared server TLS credential/context state.
-2. Decide and implement stateless-reset policy for unknown connection IDs.
-3. Reclaim closed per-stream state when no public object or incoming queue
+1. Decide and implement stateless-reset policy for unknown connection IDs.
+2. Reclaim closed per-stream state when no public object or incoming queue
    entry needs it.
-4. Consider fixed-size transmit chunks for earlier ACK memory release.
-5. Write a small Linux::Event adapter after the raw contract is stable.
-6. Keep HTTP/3 out of this transport layer for now.
+3. Consider fixed-size transmit chunks for earlier ACK memory release.
+4. Write a small Linux::Event adapter after the raw contract is stable.
+5. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

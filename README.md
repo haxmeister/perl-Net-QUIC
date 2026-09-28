@@ -183,8 +183,12 @@ chooses it.
 The server side now retires finished Connections automatically after QUIC's
 closing or draining period and removes all CID routes that belonged to them.
 
-Stateless reset policy for unknown connection IDs and shared server TLS
-credential state are still under development.
+The server certificate and private key are loaded once when the Endpoint is
+constructed. Accepted Connections create their own Picotls sessions from that
+shared TLS context, so the credential files are not reopened for each client
+and do not need to remain readable after Endpoint construction.
+
+Stateless reset policy for unknown connection IDs is still under development.
 
 ## Native dependency
 

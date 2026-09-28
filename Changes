@@ -66,6 +66,15 @@ Revision history for Net-QUIC
       does not add another large per-Connection packet buffer.
     - Test close, draining, timer retirement, CID cleanup, and retired-CID
       replay across the portability matrix.
+    - Load server certificate and private-key state once per server Endpoint.
+    - Share one Picotls server credential context across accepted Connections.
+    - Keep each Connection's Picotls session independent while retaining the
+      shared context for the Connection lifetime.
+    - Stop reopening and reparsing certificate/key files for every new client.
+    - Fail invalid server credential paths when Endpoint->server is constructed.
+    - Test two handshakes after the original credential files have been deleted.
+    - Test that a server Connection safely retains the shared TLS object after
+      the caller's original reference is released.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

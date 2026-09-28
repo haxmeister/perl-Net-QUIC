@@ -93,9 +93,9 @@ The server front door now handles Version Negotiation and optional stateless
 Retry/address validation before Connection allocation. QUIC clients verify
 server certificate chains and host names by default using Picotls and OpenSSL.
 Finished server Connections are retired automatically after QUIC's closing or
-draining period, together with all of their CID routes. Shared server TLS
-credential state and stateless reset policy for unknown connection IDs are not
-implemented yet.
+draining period, together with all of their CID routes. Server TLS credentials
+are loaded once per Endpoint and shared by accepted Connection sessions.
+Stateless reset policy for unknown connection IDs is not implemented yet.
 
 =head1 SEE ALSO
 

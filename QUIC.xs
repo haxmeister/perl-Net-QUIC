@@ -242,6 +242,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         ngtcp2_path path;
         ngtcp2_cid dcid;
         ngtcp2_cid scid;
+        const char *tls_error;
         int rv;
     CODE:
         initial = SvPVbyte(initial_sv, initiallen);
@@ -318,9 +319,10 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
 
-        if (net_quic_tls_server_prepare(ep, cert_file, key_file) != 0) {
+        tls_error = net_quic_tls_server_prepare(ep, cert_file, key_file);
+        if (tls_error != NULL) {
             net_quic_connection_free(aTHX_ ep);
-            croak("unable to initialize Picotls server credentials");
+            croak("%s", tls_error);
         }
 
         memset(&callbacks, 0, sizeof(callbacks));

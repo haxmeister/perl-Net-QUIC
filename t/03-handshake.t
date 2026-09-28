@@ -11,6 +11,11 @@ use Net::QUIC::Endpoint;
 my $client_local = pack_sockaddr_in(40000, inet_aton('127.0.0.1'));
 my $server_local = pack_sockaddr_in(4433, inet_aton('127.0.0.1'));
 my $alpn = 'net-quic-test';
+my $cert_file = "$FindBin::Bin/data/server-cert.pem";
+my $key_file = "$FindBin::Bin/data/server-key.pem";
+
+ok(-f $cert_file, 'test server certificate exists');
+ok(-f $key_file, 'test server private key exists');
 
 my $client = Net::QUIC::Endpoint->client(
     local       => $client_local,
@@ -27,8 +32,8 @@ my $server = Net::QUIC::Connection->_server_new(
     $server_local,
     $client_local,
     $alpn,
-    "$FindBin::Bin/data/server-cert.pem",
-    "$FindBin::Bin/data/server-key.pem",
+    $cert_file,
+    $key_file,
 );
 
 isa_ok($server, ['Net::QUIC::Connection'], 'private server connection is created');

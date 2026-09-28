@@ -139,7 +139,7 @@ net_quic_tls_on_client_hello(
     return PTLS_ALERT_NO_APPLICATION_PROTOCOL;
 }
 
-static int
+static const char *
 net_quic_tls_server_prepare(
     net_quic_connection *ep,
     const char *cert_file,
@@ -155,27 +155,27 @@ net_quic_tls_server_prepare(
     ep->ptls_ctx.on_client_hello = &ep->picotls_on_client_hello;
 
     if (ngtcp2_crypto_picotls_configure_server_context(&ep->ptls_ctx) != 0) {
-        return -1;
+        return "unable to configure Picotls server context";
     }
 
     if (ptls_load_certificates(&ep->ptls_ctx, cert_file) != 0) {
-        return -1;
+        return "unable to load Picotls server certificate";
     }
 
     fp = fopen(key_file, "rb");
     if (fp == NULL) {
-        return -1;
+        return "unable to open Picotls server private key";
     }
 
     pkey = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
     fclose(fp);
     if (pkey == NULL) {
-        return -1;
+        return "unable to parse Picotls server private key";
     }
 
     if (ptls_openssl_init_sign_certificate(&ep->picotls_sign_cert, pkey) != 0) {
         EVP_PKEY_free(pkey);
-        return -1;
+        return "unable to initialize Picotls signing certificate";
     }
     EVP_PKEY_free(pkey);
 
@@ -184,12 +184,12 @@ net_quic_tls_server_prepare(
     ngtcp2_crypto_picotls_ctx_init(&ep->picotls_ctx);
     ep->picotls_ctx.ptls = ptls_server_new(&ep->ptls_ctx);
     if (ep->picotls_ctx.ptls == NULL) {
-        return -1;
+        return "unable to create Picotls server session";
     }
 
     *ptls_get_data_ptr(ep->picotls_ctx.ptls) = &ep->conn_ref;
 
-    return 0;
+    return NULL;
 }
 
 static int

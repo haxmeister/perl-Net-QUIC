@@ -175,16 +175,6 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
 
-        if (odcid_data != NULL) {
-            if (hd.tokenlen == 0) {
-                net_quic_connection_free(aTHX_ ep);
-                croak("Retry-validated connection is missing its token");
-            }
-            settings.token = hd.token;
-            settings.tokenlen = hd.tokenlen;
-            settings.token_type = NGTCP2_TOKEN_TYPE_RETRY;
-        }
-
         ngtcp2_transport_params_default(&params);
         params.initial_max_stream_data_bidi_local = 256 * 1024;
         params.initial_max_stream_data_bidi_remote = 256 * 1024;
@@ -380,6 +370,16 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
 
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
+
+        if (odcid_data != NULL) {
+            if (hd.tokenlen == 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("Retry-validated connection is missing its token");
+            }
+            settings.token = hd.token;
+            settings.tokenlen = hd.tokenlen;
+            settings.token_type = NGTCP2_TOKEN_TYPE_RETRY;
+        }
 
         ngtcp2_transport_params_default(&params);
         params.initial_max_stream_data_bidi_local = 256 * 1024;

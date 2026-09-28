@@ -180,9 +180,11 @@ socket address, and accepted for 10 seconds. Address validation is optional and
 is off by default, avoiding the extra Retry round trip unless the application
 chooses it.
 
-The server side is still early development. Automatic connection retirement,
-stateless reset policy for unknown connection IDs, and shared server TLS
-credential state are not implemented yet.
+The server side now retires finished Connections automatically after QUIC's
+closing or draining period and removes all CID routes that belonged to them.
+
+Stateless reset policy for unknown connection IDs and shared server TLS
+credential state are still under development.
 
 ## Native dependency
 

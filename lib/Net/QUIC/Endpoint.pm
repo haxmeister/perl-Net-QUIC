@@ -401,11 +401,14 @@ and valid for 10 seconds. Net::QUIC creates the Connection only after the peer
 returns a valid token. A token replayed from a different peer address is
 rejected without creating connection state.
 
-This is still an early server API. Automatic connection retirement, stateless
-reset policy for unknown connection IDs, and shared server TLS credential state
-are not implemented yet. Server certificate and private-key files are
-currently loaded for each new connection rather than shared through one server
-TLS context.
+This is still an early server API. Finished Connections are retired
+automatically after QUIC's closing or draining period, and all of their CID
+routes are removed from the Endpoint at the same time.
+
+Stateless reset policy for unknown connection IDs and shared server TLS
+credential state are not implemented yet. Server certificate and private-key
+files are currently loaded for each new connection rather than shared through
+one server TLS context.
 
 =head2 connection
 

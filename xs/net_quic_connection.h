@@ -82,7 +82,6 @@ struct net_quic_connection {
     int close_wait;
     ngtcp2_tstamp retirement_deadline;
 
-    uint8_t closebuf[NGTCP2_MAX_UDP_PAYLOAD_SIZE];
     size_t closebuflen;
     int closebuf_pending;
     ngtcp2_sockaddr_union close_local_addr;

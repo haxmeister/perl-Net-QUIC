@@ -30,6 +30,24 @@ sub next_stream {
     return Net::QUIC::Stream->_new($self, $id, $info->[0], $info->[1]);
 }
 
+sub close {
+    my ($self, $application_error_code) = @_;
+
+    $application_error_code = 0
+        if !defined $application_error_code;
+
+    die "application error code must be a non-negative integer"
+        if $application_error_code !~ /\A\d+\z/;
+
+    $self->_close($application_error_code);
+    return;
+}
+
+sub closed {
+    my ($self) = @_;
+    return $self->_retired;
+}
+
 1;
 
 __END__
@@ -72,6 +90,30 @@ does not receive application data on it.
 
 Returns the next stream opened by the peer, or undef when there is no new
 incoming stream waiting.
+
+=head2 close
+
+    $connection->close;
+    $connection->close($application_error_code);
+
+Starts a normal QUIC application-level connection close.
+
+The application error code defaults to zero. Calling C<close> again while the
+connection is already closing is harmless.
+
+C<close> does not immediately destroy the Connection object. QUIC keeps a
+closing or draining connection around for a short period so late packets are
+handled correctly. The surrounding L<Net::QUIC::Endpoint> continues to report
+the timer needed for that period.
+
+=head2 closed
+
+    if ($connection->closed) {
+        ...
+    }
+
+Returns true after the connection has completely finished its QUIC closing or
+draining period and no longer needs network or timer service.
 
 =head2 ready
 

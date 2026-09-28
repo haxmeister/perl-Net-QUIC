@@ -44,6 +44,7 @@ struct net_quic_connection {
     size_t alpnlen;
     char *server_name;
     int ready;
+    int is_server;
 
     uint8_t txbuf[NET_QUIC_TX_BUFSIZE];
 

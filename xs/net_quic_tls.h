@@ -20,21 +20,27 @@ static ptls_cipher_suite_t *net_quic_picotls_cipher_suites[] = {
     NULL,
 };
 
+struct net_quic_server_tls {
+    ptls_context_t ptls_ctx;
+    ptls_openssl_sign_certificate_t sign_cert;
+    int sign_cert_ready;
+};
+
 static void
-net_quic_tls_context_defaults(net_quic_connection *ep)
+net_quic_tls_context_defaults(ptls_context_t *ctx)
 {
-    memset(&ep->ptls_ctx, 0, sizeof(ep->ptls_ctx));
-    ep->ptls_ctx.random_bytes = ptls_openssl_random_bytes;
-    ep->ptls_ctx.get_time = &ptls_get_time;
-    ep->ptls_ctx.key_exchanges = net_quic_picotls_key_exchanges;
-    ep->ptls_ctx.cipher_suites = net_quic_picotls_cipher_suites;
-    ep->ptls_ctx.require_dhe_on_psk = 1;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->random_bytes = ptls_openssl_random_bytes;
+    ctx->get_time = &ptls_get_time;
+    ctx->key_exchanges = net_quic_picotls_key_exchanges;
+    ctx->cipher_suites = net_quic_picotls_cipher_suites;
+    ctx->require_dhe_on_psk = 1;
 }
 
 static const char *
 net_quic_tls_client_prepare(net_quic_connection *ep, const char *ca_file)
 {
-    net_quic_tls_context_defaults(ep);
+    net_quic_tls_context_defaults(&ep->ptls_ctx);
 
     if (ngtcp2_crypto_picotls_configure_client_context(&ep->ptls_ctx) != 0) {
         return "unable to configure Picotls client context";
@@ -158,9 +164,13 @@ net_quic_tls_on_client_hello(
     return PTLS_ALERT_NO_APPLICATION_PROTOCOL;
 }
 
+static ptls_on_client_hello_t net_quic_tls_client_hello_cb = {
+    net_quic_tls_on_client_hello
+};
+
 static const char *
-net_quic_tls_server_prepare(
-    net_quic_connection *ep,
+net_quic_server_tls_init(
+    net_quic_server_tls *tls,
     const char *cert_file,
     const char *key_file
 )
@@ -168,16 +178,14 @@ net_quic_tls_server_prepare(
     FILE *fp;
     EVP_PKEY *pkey;
 
-    net_quic_tls_context_defaults(ep);
+    net_quic_tls_context_defaults(&tls->ptls_ctx);
+    tls->ptls_ctx.on_client_hello = &net_quic_tls_client_hello_cb;
 
-    ep->picotls_on_client_hello.cb = net_quic_tls_on_client_hello;
-    ep->ptls_ctx.on_client_hello = &ep->picotls_on_client_hello;
-
-    if (ngtcp2_crypto_picotls_configure_server_context(&ep->ptls_ctx) != 0) {
+    if (ngtcp2_crypto_picotls_configure_server_context(&tls->ptls_ctx) != 0) {
         return "unable to configure Picotls server context";
     }
 
-    if (ptls_load_certificates(&ep->ptls_ctx, cert_file) != 0) {
+    if (ptls_load_certificates(&tls->ptls_ctx, cert_file) != 0) {
         return "unable to load Picotls server certificate";
     }
 
@@ -192,16 +200,48 @@ net_quic_tls_server_prepare(
         return "unable to parse Picotls server private key";
     }
 
-    if (ptls_openssl_init_sign_certificate(&ep->picotls_sign_cert, pkey) != 0) {
+    if (ptls_openssl_init_sign_certificate(&tls->sign_cert, pkey) != 0) {
         EVP_PKEY_free(pkey);
         return "unable to initialize Picotls signing certificate";
     }
     EVP_PKEY_free(pkey);
 
-    ep->ptls_ctx.sign_certificate = &ep->picotls_sign_cert.super;
+    tls->sign_cert_ready = 1;
+    tls->ptls_ctx.sign_certificate = &tls->sign_cert.super;
 
+    return NULL;
+}
+
+static void
+net_quic_server_tls_dispose(net_quic_server_tls *tls)
+{
+    size_t i;
+
+    if (tls == NULL) {
+        return;
+    }
+
+    if (tls->sign_cert_ready) {
+        ptls_openssl_dispose_sign_certificate(&tls->sign_cert);
+        tls->sign_cert_ready = 0;
+    }
+
+    for (i = 0; i < tls->ptls_ctx.certificates.count; ++i) {
+        net_quic_system_free(tls->ptls_ctx.certificates.list[i].base);
+    }
+    net_quic_system_free(tls->ptls_ctx.certificates.list);
+    tls->ptls_ctx.certificates.list = NULL;
+    tls->ptls_ctx.certificates.count = 0;
+}
+
+static const char *
+net_quic_tls_server_prepare(
+    net_quic_connection *ep,
+    net_quic_server_tls *tls
+)
+{
     ngtcp2_crypto_picotls_ctx_init(&ep->picotls_ctx);
-    ep->picotls_ctx.ptls = ptls_server_new(&ep->ptls_ctx);
+    ep->picotls_ctx.ptls = ptls_server_new(&tls->ptls_ctx);
     if (ep->picotls_ctx.ptls == NULL) {
         return "unable to create Picotls server session";
     }
@@ -229,8 +269,6 @@ net_quic_tls_server_finish(pTHX_ net_quic_connection *ep)
 static void
 net_quic_tls_cleanup(pTHX_ net_quic_connection *ep)
 {
-    size_t i;
-
     ngtcp2_crypto_picotls_deconfigure_session(&ep->picotls_ctx);
     Safefree(ep->picotls_ctx.handshake_properties.additional_extensions);
     ep->picotls_ctx.handshake_properties.additional_extensions = NULL;
@@ -247,16 +285,4 @@ net_quic_tls_cleanup(pTHX_ net_quic_connection *ep)
         ep->picotls_verify_cert_ready = 0;
     }
 
-    if (ep->is_server) {
-        if (ep->picotls_sign_cert.key != NULL) {
-            ptls_openssl_dispose_sign_certificate(&ep->picotls_sign_cert);
-        }
-
-        for (i = 0; i < ep->ptls_ctx.certificates.count; ++i) {
-            net_quic_system_free(ep->ptls_ctx.certificates.list[i].base);
-        }
-        net_quic_system_free(ep->ptls_ctx.certificates.list);
-        ep->ptls_ctx.certificates.list = NULL;
-        ep->ptls_ctx.certificates.count = 0;
-    }
 }

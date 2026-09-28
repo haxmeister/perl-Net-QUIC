@@ -55,6 +55,17 @@ Revision history for Net-QUIC
       host name.
     - Keep certificate verification mandatory; no skip-verification switch is
       exposed.
+    - Add Connection close and closed lifecycle methods.
+    - Keep closing and draining Connections alive for the QUIC 3-PTO wait.
+    - Retire idle-closed and dropped Connections without leaving Endpoint state.
+    - Remove retired server Connections from the managed connection list,
+      pending accept queue, and every CID route.
+    - Ignore replayed packets for retired connection IDs instead of recreating
+      a Connection.
+    - Reuse the existing transmit buffer for CONNECTION_CLOSE so retirement
+      does not add another large per-Connection packet buffer.
+    - Test close, draining, timer retirement, CID cleanup, and retired-CID
+      replay across the portability matrix.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

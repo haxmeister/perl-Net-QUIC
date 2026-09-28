@@ -2,20 +2,19 @@
 
 ## Current branch
 
-feature/server-front-door
+feature/connection-retirement
 
 Current main baseline:
 
-1decd967f0a4944232d9790fcf3db58dac8a2eb9
+5f8f85991feda3c1f8d6f87e8341e163115bbbcc
 
 Immediate branch scope:
 
-- add the stateless server front door
-- add Retry/address validation for new clients
-- add version-negotiation responses
-- keep UDP socket ownership outside Net::QUIC
-- preserve the existing Endpoint receive/send/timer contract
-- do not mix client certificate verification or Connection retirement into this branch unless required by the front-door design
+- retire finished Connections automatically
+- remove every CID route owned by a retired server Connection
+- keep the existing Endpoint receive/send/timer contract
+- expose a simple Connection close lifecycle
+- preserve QUIC closing and draining timing instead of destroying state early
 
 Baseline before the Picotls-only cleanup:
 
@@ -371,16 +370,47 @@ The existing self-signed localhost fixture is now explicitly trusted by tests
 through ca_file. This proves the real verification path rather than bypassing
 verification.
 
+Connection retirement and route cleanup are now implemented on
+feature/connection-retirement.
+
+Code-bearing checkpoint:
+
+- head: 0efaa8ed974f3b89d804a3d4aa167d406a95be89
+- GitHub Actions run: 36495035785
+- full 15-job matrix: PASS
+- 10 test files / 125 tests
+- Linux Perl 5.20 through 5.44: PASS
+- macOS: PASS
+- Windows: PASS
+
+Lifecycle behavior now is:
+
+- Connection->close($application_error_code) starts a normal QUIC application
+  close; the error code defaults to zero
+- Connection->closed becomes true only after the connection no longer needs
+  QUIC network or timer service
+- peer CONNECTION_CLOSE enters draining without being treated as a Perl error
+- local closing and peer draining are kept for 3 * PTO, matching ngtcp2's
+  server example and QUIC closing semantics
+- idle-close and drop-connection outcomes retire immediately
+- a server Endpoint removes retired Connections from its owned connection list
+- a retired Connection is also removed from the pending accept queue if the
+  application never consumed it
+- every CID route pointing at the retired Connection is removed together
+- replaying an old packet for a retired CID is dropped and does not create a
+  new Connection
+- the close packet reuses the existing per-Connection transmit buffer, so this
+  feature does not add a second large packet buffer to every Connection
+
 Next:
 
-1. Add Connection retirement and route cleanup.
-2. Add shared server TLS credential/context state.
-3. Decide and implement stateless-reset policy for unknown connection IDs.
-4. Reclaim closed per-stream state when no public object or incoming queue
+1. Add shared server TLS credential/context state.
+2. Decide and implement stateless-reset policy for unknown connection IDs.
+3. Reclaim closed per-stream state when no public object or incoming queue
    entry needs it.
-5. Consider fixed-size transmit chunks for earlier ACK memory release.
-6. Write a small Linux::Event adapter after the raw contract is stable.
-7. Keep HTTP/3 out of this transport layer for now.
+4. Consider fixed-size transmit chunks for earlier ACK memory release.
+5. Write a small Linux::Event adapter after the raw contract is stable.
+6. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

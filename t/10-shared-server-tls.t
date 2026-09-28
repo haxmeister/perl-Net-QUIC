@@ -173,7 +173,22 @@ like(
         );
     },
     qr/unable to load Picotls server certificate/,
-    'bad server credentials fail when Endpoint is constructed',
+    'missing certificate fails when Endpoint is constructed',
+);
+
+my $valid_cert = "$dir/valid-cert.pem";
+copy_file($source_cert, $valid_cert);
+
+like(
+    dies {
+        Net::QUIC::Endpoint->server(
+            alpn             => $alpn,
+            certificate_file => $valid_cert,
+            private_key_file => "$dir/missing-key.pem",
+        );
+    },
+    qr/unable to open Picotls server private key/,
+    'missing private key fails when Endpoint is constructed',
 );
 
 done_testing;

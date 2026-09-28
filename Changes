@@ -75,6 +75,15 @@ Revision history for Net-QUIC
     - Test two handshakes after the original credential files have been deleted.
     - Test that a server Connection safely retains the shared TLS object after
       the caller's original reference is released.
+    - Add Stateless Reset handling for sufficiently large unknown short-header
+      packets without allocating new Connection state.
+    - Derive server reset tokens from the Endpoint-private secret and each
+      server-issued connection ID, including the initial server connection ID.
+    - Drop unknown long-header packets and undersized short-header packets
+      instead of resetting them.
+    - Keep Stateless Reset responses smaller than their triggering packets.
+    - Test unknown, deliberately unrouted, and normally retired connection IDs,
+      including client recognition of the advertised reset token.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

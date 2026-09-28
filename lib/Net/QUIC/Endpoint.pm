@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Carp qw(croak);
+use Scalar::Util qw(refaddr);
 use Net::QUIC ();
 use Net::QUIC::Connection ();
 use Net::QUIC::Datagram ();
@@ -79,6 +80,49 @@ sub _sync_server_routes {
     return;
 }
 
+sub _retire_server_connections {
+    my ($self) = @_;
+    my %retired;
+
+    for my $connection (@{$self->{connections}}) {
+        next if !$connection->_retired;
+        $retired{refaddr($connection)} = 1;
+    }
+
+    return if !%retired;
+
+    @{$self->{connections}} = grep {
+        !$retired{refaddr($_)}
+    } @{$self->{connections}};
+
+    @{$self->{pending_connections}} = grep {
+        !$retired{refaddr($_)}
+    } @{$self->{pending_connections}};
+
+    for my $cid (keys %{$self->{routes}}) {
+        my $connection = $self->{routes}{$cid};
+        delete $self->{routes}{$cid}
+            if $retired{refaddr($connection)};
+    }
+
+    my $count = @{$self->{connections}};
+    $self->{tx_cursor} = $count
+        ? $self->{tx_cursor} % $count
+        : 0;
+
+    return;
+}
+
+sub _managed_connection_count {
+    my ($self) = @_;
+    return scalar @{$self->{connections}};
+}
+
+sub _route_count {
+    my ($self) = @_;
+    return scalar keys %{$self->{routes}};
+}
+
 sub _server_receive_datagram {
     my ($self, $bytes, $local, $peer) = @_;
 
@@ -122,16 +166,20 @@ sub _server_receive_datagram {
         push @{$self->{connections}}, $connection;
         push @{$self->{pending_connections}}, $connection;
         $self->_sync_server_routes($connection);
+        $self->_retire_server_connections;
         return;
     }
 
     $connection->_receive_datagram($bytes, $local, $peer);
     $self->_sync_server_routes($connection);
+    $self->_retire_server_connections;
     return;
 }
 
 sub _server_next_datagram {
     my ($self) = @_;
+
+    $self->_retire_server_connections;
 
     if (@{$self->{stateless_tx}}) {
         return shift @{$self->{stateless_tx}};
@@ -160,6 +208,8 @@ sub _server_timeout_after {
     my ($self) = @_;
     my $minimum;
 
+    $self->_retire_server_connections;
+
     for my $connection (@{$self->{connections}}) {
         my $after = $connection->_timeout_after;
         next if !defined $after;
@@ -182,6 +232,7 @@ sub _server_handle_timeout {
         $self->_sync_server_routes($connection);
     }
 
+    $self->_retire_server_connections;
     return;
 }
 

@@ -1,20 +1,8 @@
 use strict;
 use warnings;
 
-use Alien::ngtcp2 0.02 ();
+use Alien::ngtcp2 0.03 ();
 use ExtUtils::MakeMaker;
-
-my %backend_define = (
-    openssl   => '-DNET_QUIC_CRYPTO_OPENSSL',
-    gnutls    => '-DNET_QUIC_CRYPTO_GNUTLS',
-    boringssl => '-DNET_QUIC_CRYPTO_BORINGSSL',
-    wolfssl   => '-DNET_QUIC_CRYPTO_WOLFSSL',
-    picotls   => '-DNET_QUIC_CRYPTO_PICOTLS',
-);
-
-my $backend = Alien::ngtcp2->crypto_backend;
-die "Unsupported Alien::ngtcp2 crypto backend '$backend'\n"
-    if !exists $backend_define{$backend};
 
 my $cflags = join ' ', grep { defined && length }
     Alien::ngtcp2->cflags,
@@ -58,12 +46,12 @@ WriteMakefile(
     MIN_PERL_VERSION => '5.020',
 
     CONFIGURE_REQUIRES => {
-        'Alien::ngtcp2'       => '0.02',
+        'Alien::ngtcp2'       => '0.03',
         'ExtUtils::MakeMaker' => 0,
     },
 
     PREREQ_PM => {
-        'Alien::ngtcp2' => '0.02',
+        'Alien::ngtcp2' => '0.03',
         'Carp'          => 0,
         'XSLoader'      => 0,
     },
@@ -74,7 +62,6 @@ WriteMakefile(
 
     INC    => $cflags,
     LIBS   => [$libs],
-    DEFINE => $backend_define{$backend},
 
     META_MERGE => {
         'meta-spec' => {

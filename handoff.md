@@ -2,21 +2,17 @@
 
 ## Current branch
 
-feature/client-endpoint
+feature/handshake-proof
 
-Base branch:
+Baseline before the Picotls-only cleanup:
 
-feature/initial-native-core
-
-Current implementation head before this handoff update:
-
-ab964def0742c745b71671f4daf63ddfd2245ec7
+e4218ca85faf2e6e5fdffcaa7516b7db3c362efa
 
 ## Purpose
 
 Net::QUIC is the public Perl QUIC transport distribution built on ngtcp2.
 
-The native dependency is supplied by Alien::ngtcp2 0.02 or newer.
+The native dependency is supplied by Alien::ngtcp2 0.03 or newer.
 
 Net::QUIC is intentionally event-loop neutral.
 
@@ -78,7 +74,7 @@ The branch now contains:
 - Net::QUIC::Connection
 - Net::QUIC::Datagram
 - a native client QUIC connection using ngtcp2
-- provider-neutral TLS setup below the Perl API
+- one Picotls TLS implementation below the Perl API
 - receive_datagram
 - next_datagram
 - timeout_after
@@ -146,38 +142,41 @@ without first considering the Windows Perl allocator boundary.
 
 ## TLS provider rule
 
-Net::QUIC consumes the provider selected by Alien::ngtcp2.
+Net::QUIC has one TLS implementation: Picotls.
 
-Normal users must not receive backend-specific Perl objects.
+Alien::ngtcp2 0.03 supplies the tested ngtcp2/Picotls pair. Picotls handles
+TLS 1.3 and uses the host OpenSSL installation underneath for cryptography and
+X.509 certificate support.
 
-Private native setup currently covers the provider families selected by
-Alien::ngtcp2:
+Normal users do not choose a TLS backend. Net::QUIC::crypto_backend remains as
+a diagnostic and reports picotls.
 
-- OpenSSL
-- GnuTLS
-- BoringSSL
-- wolfSSL
-- Picotls
-
-Keep provider-specific details below the Perl API.
+Do not restore separate OpenSSL, GnuTLS, BoringSSL, or wolfSSL QUIC TLS paths
+unless the project direction is explicitly changed.
 
 ## Native dependency detail
 
-Alien::ngtcp2 0.02 supplies libngtcp2 and one usable TLS helper.
+Alien::ngtcp2 0.03 supplies libngtcp2, libngtcp2_crypto_picotls, the pinned
+Picotls build, and the flags needed to use them.
 
 Alien::ngtcp2 can return absolute static archive filenames in crypto_libs.
 ExtUtils::MakeMaker filters bare archive filenames out of LIBS, so Net::QUIC
 translates those filenames to equivalent -L and -l flags before passing them
 to MakeMaker.
 
-CI still bootstraps Alien::ngtcp2 from the released v0.020 GitHub tag because
-that was required while CPAN indexing lagged immediately after release.
+CI now installs Alien::ngtcp2 0.03 from CPAN. The broad Linux Perl matrix
+from 5.20 through 5.44 remains intact, along with macOS and Windows coverage.
 
 ## Next useful work
 
-The event-loop boundary itself is now implemented and tested.
+The event-loop boundary itself is implemented and tested.
 
-Next work should build upward from this without changing that boundary:
+The current feature branch removes the old multi-provider TLS code and keeps
+only the Picotls path supplied by Alien::ngtcp2 0.03. CI for that cleanup is
+the next gate.
+
+After the Picotls-only client baseline is green, continue without changing the
+event-loop boundary:
 
 1. Add a private server-side Connection constructor used only by tests.
 2. Exchange client and server datagrams entirely in memory and complete a real

@@ -36,8 +36,10 @@ The first transport-facing API is L<Net::QUIC::Endpoint>. An event-loop
 integration feeds received UDP datagrams into an endpoint, sends the datagrams
 it produces, and schedules the timeout it requests.
 
-Normal applications should not need to choose a TLS backend. Alien::ngtcp2
-selects one that fits the host system when Net::QUIC is built.
+Net::QUIC uses Picotls for QUIC TLS. Alien::ngtcp2 supplies the tested
+ngtcp2 and Picotls build. Picotls uses the host OpenSSL installation underneath
+for cryptography and certificate support. Applications do not choose a TLS
+backend.
 
 =head1 FUNCTIONS
 
@@ -57,8 +59,8 @@ Returns ngtcp2's numeric version value.
 
     my $backend = Net::QUIC::crypto_backend();
 
-Returns the TLS backend selected when Net::QUIC was built. This is diagnostic
-information. Application code should not need to change behavior based on it.
+Returns C<picotls>. This diagnostic exists so a build can report its native
+QUIC TLS implementation. Application code should not need to branch on it.
 
 =head1 EVENT LOOP BOUNDARY
 

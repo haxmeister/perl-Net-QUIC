@@ -140,7 +140,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
 
         if (net_quic_tls_prepare(ep) != 0) {
             net_quic_connection_free(aTHX_ ep);
-            croak("unable to initialize the selected QUIC TLS backend");
+            croak("unable to initialize Picotls for QUIC");
         }
 
         memset(&callbacks, 0, sizeof(callbacks));
@@ -204,7 +204,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
 
         if (net_quic_tls_finish(aTHX_ ep) != 0) {
             net_quic_connection_free(aTHX_ ep);
-            croak("unable to configure the selected QUIC TLS backend");
+            croak("unable to configure Picotls for QUIC");
         }
 
         RETVAL = net_quic_connection_bless(class, ep);

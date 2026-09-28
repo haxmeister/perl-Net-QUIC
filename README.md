@@ -93,15 +93,13 @@ server endpoints, and the final certificate verification API come next.
 
 ## Native dependency
 
-Net::QUIC uses Alien::ngtcp2 0.02 or newer.
+Net::QUIC uses Alien::ngtcp2 0.03 or newer.
 
-Alien::ngtcp2 supplies:
+Net::QUIC has one QUIC TLS path: Picotls. Alien::ngtcp2 supplies the tested
+ngtcp2 and Picotls build. Picotls handles TLS 1.3 and uses the host OpenSSL
+installation underneath for cryptography and certificate support.
 
-- libngtcp2
-- one compatible ngtcp2 TLS helper
-
-The TLS helper is selected to fit the host system. Normal Net::QUIC users
-should not need to choose OpenSSL, GnuTLS, Picotls, or another backend.
+Normal Net::QUIC users do not choose a TLS backend.
 
 ## Development
 

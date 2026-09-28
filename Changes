@@ -1,6 +1,9 @@
 Revision history for Net-QUIC
 
 0.001_002  2026-09-27
+    - Require Alien::ngtcp2 0.03 and use its fixed Picotls QUIC TLS path.
+    - Remove the OpenSSL, GnuTLS, BoringSSL, and wolfSSL backend branches.
+    - Install Alien::ngtcp2 0.03 from CPAN in the full CI matrix.
     - Add the first real client QUIC endpoint.
     - Separate the event-loop Endpoint object from the application-facing
       Connection object before server support is added.

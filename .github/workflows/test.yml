@@ -35,8 +35,8 @@ jobs:
       - name: Install Alien build support
         run: cpanm --notest Alien::Build::MM
 
-      - name: Install released Alien::ngtcp2 0.02
-        run: cpanm --notest https://github.com/haxmeister/perl-Alien-ngtcp2/archive/refs/tags/v0.020.tar.gz
+      - name: Install Alien::ngtcp2 0.03 from CPAN
+        run: cpanm --notest Alien::ngtcp2@0.03
 
       - name: Install dependencies
         run: cpanm --installdeps --notest .
@@ -63,8 +63,8 @@ jobs:
       - name: Install Alien build support
         run: cpanm --notest Alien::Build::MM
 
-      - name: Install released Alien::ngtcp2 0.02
-        run: cpanm --notest https://github.com/haxmeister/perl-Alien-ngtcp2/archive/refs/tags/v0.020.tar.gz
+      - name: Install Alien::ngtcp2 0.03 from CPAN
+        run: cpanm --notest Alien::ngtcp2@0.03
 
       - name: Install dependencies
         run: cpanm --installdeps --notest .

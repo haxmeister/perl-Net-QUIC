@@ -15,48 +15,17 @@
 # include <time.h>
 #endif
 
-#if defined(NET_QUIC_CRYPTO_OPENSSL)
-# include <ngtcp2/ngtcp2_crypto_ossl.h>
-# include <openssl/rand.h>
-# include <openssl/ssl.h>
-#elif defined(NET_QUIC_CRYPTO_GNUTLS)
-# include <ngtcp2/ngtcp2_crypto_gnutls.h>
-# include <gnutls/crypto.h>
-# include <gnutls/gnutls.h>
-#elif defined(NET_QUIC_CRYPTO_BORINGSSL)
-# include <ngtcp2/ngtcp2_crypto_boringssl.h>
-# include <openssl/rand.h>
-# include <openssl/ssl.h>
-#elif defined(NET_QUIC_CRYPTO_WOLFSSL)
-# include <ngtcp2/ngtcp2_crypto_wolfssl.h>
-# include <wolfssl/options.h>
-# include <wolfssl/ssl.h>
-# include <wolfssl/quic.h>
-#elif defined(NET_QUIC_CRYPTO_PICOTLS)
-# include <ngtcp2/ngtcp2_crypto_picotls.h>
-# include <openssl/rand.h>
-# include <picotls.h>
-# include <picotls/openssl.h>
-#endif
+#include <ngtcp2/ngtcp2_crypto_picotls.h>
+#include <openssl/rand.h>
+#include <picotls.h>
+#include <picotls/openssl.h>
 
 #define NET_QUIC_TX_BUFSIZE 65536
 
 static const char *
 net_quic_crypto_backend(void)
 {
-#if defined(NET_QUIC_CRYPTO_OPENSSL)
-    return "openssl";
-#elif defined(NET_QUIC_CRYPTO_GNUTLS)
-    return "gnutls";
-#elif defined(NET_QUIC_CRYPTO_BORINGSSL)
-    return "boringssl";
-#elif defined(NET_QUIC_CRYPTO_WOLFSSL)
-    return "wolfssl";
-#elif defined(NET_QUIC_CRYPTO_PICOTLS)
     return "picotls";
-#else
-# error "Net::QUIC was built without a supported crypto backend"
-#endif
 }
 
 typedef struct net_quic_connection net_quic_connection;
@@ -77,24 +46,9 @@ struct net_quic_connection {
 
     uint8_t txbuf[NET_QUIC_TX_BUFSIZE];
 
-#if defined(NET_QUIC_CRYPTO_OPENSSL)
-    SSL_CTX *ssl_ctx;
-    SSL *ssl;
-    ngtcp2_crypto_ossl_ctx *ossl_ctx;
-#elif defined(NET_QUIC_CRYPTO_GNUTLS)
-    gnutls_certificate_credentials_t cred;
-    gnutls_session_t session;
-#elif defined(NET_QUIC_CRYPTO_BORINGSSL)
-    SSL_CTX *ssl_ctx;
-    SSL *ssl;
-#elif defined(NET_QUIC_CRYPTO_WOLFSSL)
-    WOLFSSL_CTX *ssl_ctx;
-    WOLFSSL *ssl;
-#elif defined(NET_QUIC_CRYPTO_PICOTLS)
-    ptls_context_t ptls_ctx;
+ptls_context_t ptls_ctx;
     ngtcp2_crypto_picotls_ctx picotls_ctx;
     ptls_iovec_t picotls_alpn;
-#endif
 };
 
 static ngtcp2_tstamp
@@ -130,17 +84,7 @@ net_quic_now(void)
 static int
 net_quic_random_bytes(uint8_t *dest, size_t destlen)
 {
-#if defined(NET_QUIC_CRYPTO_OPENSSL) || \
-    defined(NET_QUIC_CRYPTO_BORINGSSL) || \
-    defined(NET_QUIC_CRYPTO_PICOTLS)
     return RAND_bytes(dest, (int)destlen) == 1 ? 0 : -1;
-#elif defined(NET_QUIC_CRYPTO_GNUTLS)
-    return gnutls_rnd(GNUTLS_RND_RANDOM, dest, destlen) == 0 ? 0 : -1;
-#elif defined(NET_QUIC_CRYPTO_WOLFSSL)
-    return wolfSSL_RAND_bytes(dest, (int)destlen) == 1 ? 0 : -1;
-#else
-    return -1;
-#endif
 }
 
 static void

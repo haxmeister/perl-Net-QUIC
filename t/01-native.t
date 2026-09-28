@@ -18,10 +18,10 @@ ok(
     'linked ngtcp2 is at least 1.25.0',
 );
 
-like(
+is(
     Net::QUIC::crypto_backend(),
-    qr/\A(?:openssl|gnutls|boringssl|wolfssl|picotls)\z/,
-    'a supported crypto backend is compiled in',
+    'picotls',
+    'Picotls is the QUIC TLS backend',
 );
 
 ok(

@@ -40,6 +40,7 @@ my $server = Net::QUIC::Connection->_server_new(
 );
 
 isa_ok($server, ['Net::QUIC::Connection'], 'private server connection is created');
+undef $server_tls;
 ok(!$client->connection->ready, 'client is not ready before packet exchange');
 ok(!$server->ready, 'server is not ready before receiving the Initial');
 

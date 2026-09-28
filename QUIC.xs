@@ -64,6 +64,22 @@ _crypto_self_test()
 
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Endpoint
 
+int
+_arg_probe(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
+    SV *class_sv
+    SV *local_sv
+    SV *peer_sv
+    SV *alpn_sv
+    SV *server_name_sv
+    CODE:
+        RETVAL = SvOK(class_sv)
+            && SvOK(local_sv)
+            && SvOK(peer_sv)
+            && SvOK(alpn_sv)
+            && SvOK(server_name_sv);
+    OUTPUT:
+        RETVAL
+
 SV *
 _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
     SV *class_sv

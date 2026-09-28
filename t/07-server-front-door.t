@@ -54,9 +54,16 @@ is(
     0,
     'stateless response is a Version Negotiation packet',
 );
-is(
-    unpack('N', substr($vn->data, -4)),
-    1,
+my $vn_data = $vn->data;
+my $offset = 5;
+my $dcid_len = unpack('C', substr($vn_data, $offset, 1));
+$offset += 1 + $dcid_len;
+my $scid_len = unpack('C', substr($vn_data, $offset, 1));
+$offset += 1 + $scid_len;
+my @versions = unpack('N*', substr($vn_data, $offset));
+
+ok(
+    scalar(grep { $_ == 1 } @versions),
     'Version Negotiation advertises QUIC v1',
 );
 ok(

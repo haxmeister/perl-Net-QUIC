@@ -48,11 +48,15 @@ sub server {
             if !defined $args{$name};
     }
 
+    my $server_tls = Net::QUIC::_ServerTLS->_new(
+        $args{certificate_file},
+        $args{private_key_file},
+    );
+
     return bless {
         mode                => 'server',
         alpn                => $args{alpn},
-        certificate_file    => $args{certificate_file},
-        private_key_file    => $args{private_key_file},
+        server_tls          => $server_tls,
         cid_length          => $class->_server_cid_length,
         retry_secret        => $class->_server_secret,
         validate_address    => $args{validate_address} ? 1 : 0,
@@ -155,8 +159,7 @@ sub _server_receive_datagram {
             $local,
             $peer,
             $self->{alpn},
-            $self->{certificate_file},
-            $self->{private_key_file},
+            $self->{server_tls},
             $front->[1],
         );
 

@@ -58,7 +58,7 @@ sub server {
         alpn                => $args{alpn},
         server_tls          => $server_tls,
         cid_length          => $class->_server_cid_length,
-        retry_secret        => $class->_server_secret,
+        server_secret       => $class->_server_secret,
         validate_address    => $args{validate_address} ? 1 : 0,
         stateless_tx        => [],
         routes              => {},
@@ -139,7 +139,7 @@ sub _server_receive_datagram {
         my $front = $self->_server_front_door(
             $bytes,
             $peer,
-            $self->{retry_secret},
+            $self->{server_secret},
             $self->{validate_address},
         );
 
@@ -161,6 +161,7 @@ sub _server_receive_datagram {
             $self->{alpn},
             $self->{server_tls},
             $front->[1],
+            $self->{server_secret},
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
@@ -413,7 +414,11 @@ constructed. Accepted Connections create their own Picotls sessions from that
 shared server TLS context instead of reopening or reparsing the credential
 files. Connections retain the shared context for as long as they need it.
 
-Stateless reset policy for unknown connection IDs is not implemented yet.
+Unknown short-header packets that cannot be routed to a live Connection can
+receive a Stateless Reset when they are large enough to do so safely. The
+Endpoint derives reset tokens from its private server secret and the destination
+connection ID, so it does not recreate Connection state just to send the reset.
+Unknown long-header packets and packets that are too small are dropped.
 
 =head2 connection
 

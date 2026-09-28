@@ -313,7 +313,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -321,6 +321,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *alpn_sv
     SV *server_tls_sv
     SV *odcid_sv
+    SV *server_secret_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -328,6 +329,8 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         const char *peer;
         const char *alpn;
         net_quic_server_tls *server_tls;
+        const char *server_secret_data = NULL;
+        STRLEN server_secret_len = 0;
         STRLEN initiallen;
         STRLEN locallen;
         STRLEN peerlen;
@@ -350,6 +353,12 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         peer = SvPVbyte(peer_sv, peerlen);
         alpn = SvPVbyte(alpn_sv, alpnlen);
         server_tls = net_quic_server_tls_from_sv(server_tls_sv);
+        if (SvOK(server_secret_sv)) {
+            server_secret_data = SvPVbyte(server_secret_sv, server_secret_len);
+            if (server_secret_len != NET_QUIC_SERVER_SECRET_LEN) {
+                croak("server secret has invalid length");
+            }
+        }
         if (SvOK(odcid_sv)) {
             odcid_data = SvPVbyte(odcid_sv, odcid_len);
             if (odcid_len == 0 || odcid_len > NGTCP2_MAX_CIDLEN) {
@@ -389,6 +398,20 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
             croak("unable to allocate Net::QUIC::Connection");
         }
         ep->is_server = 1;
+
+        if (server_secret_data != NULL) {
+            memcpy(
+                ep->server_secret,
+                server_secret_data,
+                sizeof(ep->server_secret)
+            );
+        } else if (net_quic_random_bytes(
+                ep->server_secret,
+                sizeof(ep->server_secret)
+            ) != 0) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to generate server secret");
+        }
 
         if (net_quic_copy_sockaddr(
                 &ep->local_addr,
@@ -481,6 +504,18 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         params.initial_max_streams_bidi = 100;
         params.initial_max_streams_uni = 100;
         params.active_connection_id_limit = 4;
+        params.stateless_reset_token_present = 1;
+
+        rv = ngtcp2_crypto_generate_stateless_reset_token(
+            params.stateless_reset_token,
+            ep->server_secret,
+            sizeof(ep->server_secret),
+            &scid
+        );
+        if (rv != 0) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to generate server stateless reset token");
+        }
 
         if (odcid_data != NULL) {
             ngtcp2_cid_init(
@@ -1327,7 +1362,7 @@ _server_secret(class)
     CODE:
         (void)class;
         if (net_quic_random_bytes(secret, sizeof(secret)) != 0) {
-            croak("unable to generate server Retry secret");
+            croak("unable to generate server secret");
         }
         RETVAL = newSVpvn((const char *)secret, (STRLEN)sizeof(secret));
     OUTPUT:
@@ -1434,11 +1469,15 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
         ngtcp2_pkt_hd hd;
         ngtcp2_cid retry_scid;
         ngtcp2_cid odcid;
+        ngtcp2_cid reset_cid;
+        ngtcp2_stateless_reset_token reset_token;
         uint8_t token[NGTCP2_CRYPTO_MAX_RETRY_TOKENLEN2];
         uint8_t response[NGTCP2_MAX_UDP_PAYLOAD_SIZE];
+        uint8_t reset_random[NET_QUIC_STATELESS_RESET_MAX_RANDLEN];
         uint8_t unused_random;
         uint32_t supported_versions[2];
         size_t supported_versionslen;
+        size_t reset_random_len;
         ngtcp2_ssize tokenlen;
         ngtcp2_ssize nwrite;
         ngtcp2_tstamp now;
@@ -1516,7 +1555,64 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                 );
 
                 if (rv != 0) {
-                    av_push(av, newSViv(0));
+                    if (
+                        datalen >= NET_QUIC_SERVER_CIDLEN + 21 &&
+                        (((const uint8_t *)data)[0] & 0x80) == 0
+                    ) {
+                        ngtcp2_cid_init(
+                            &reset_cid,
+                            vcid.dcid,
+                            vcid.dcidlen
+                        );
+
+                        rv = ngtcp2_crypto_generate_stateless_reset_token(
+                            reset_token.data,
+                            (const uint8_t *)secret,
+                            (size_t)secretlen,
+                            &reset_cid
+                        );
+                        if (rv != 0) {
+                            croak("unable to generate stateless reset token");
+                        }
+
+                        reset_random_len = datalen <= 43
+                            ? (size_t)datalen
+                                - NGTCP2_STATELESS_RESET_TOKENLEN
+                                - 1
+                            : NET_QUIC_STATELESS_RESET_MAX_RANDLEN;
+
+                        if (net_quic_random_bytes(
+                                reset_random,
+                                reset_random_len
+                            ) != 0) {
+                            croak("unable to generate stateless reset randomness");
+                        }
+
+                        nwrite = ngtcp2_pkt_write_stateless_reset2(
+                            response,
+                            sizeof(response),
+                            &reset_token,
+                            reset_random,
+                            reset_random_len
+                        );
+                        if (nwrite < 0) {
+                            croak(
+                                "unable to write QUIC Stateless Reset: %s",
+                                ngtcp2_strerror((int)nwrite)
+                            );
+                        }
+
+                        av_push(av, newSViv(1));
+                        av_push(
+                            av,
+                            newSVpvn(
+                                (const char *)response,
+                                (STRLEN)nwrite
+                            )
+                        );
+                    } else {
+                        av_push(av, newSViv(0));
+                    }
                     RETVAL = newRV_noinc((SV *)av);
                 } else if (hd.tokenlen == 0 && validate_address) {
                     retry_scid.datalen = NET_QUIC_SERVER_CIDLEN;

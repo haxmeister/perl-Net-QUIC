@@ -2,23 +2,33 @@
 
 ## Current branch
 
-feature/shared-server-tls-context
+feature/stateless-reset
 
 Current main baseline:
 
-0a11e291e03ee49c98a68033406d2366d30f373e
+ad7ff88f999142935f22bbfe18141d61f5b22cfe
 
-Immediate branch scope:
+Validated branch checkpoint before this handoff update:
 
-- load server certificate and private-key state once per Endpoint
-- share one Picotls server credential context across accepted Connections
-- keep each Connection's Picotls session independent
-- keep the shared context alive for any Connection that still references it
-- preserve the existing public Endpoint API
+c691bf69fd3e01665ca1630472edcb6e37c9069d
 
-Baseline before the Picotls-only cleanup:
+Draft PR:
 
-e4218ca85faf2e6e5fdffcaa7516b7db3c362efa
+#2
+
+Immediate branch scope is complete:
+
+- implement Stateless Reset for unknown server connection IDs
+- derive reset tokens from an Endpoint-private secret and the destination CID
+- advertise the initial server reset token during the handshake
+- derive reset tokens for later server-issued CIDs
+- reset only eligible unknown short-header packets
+- drop unknown long-header and undersized packets
+- keep reset responses smaller than the packets that trigger them
+- do not allocate Connection state just to answer with a reset
+- preserve the existing public Endpoint API and event-loop boundary
+
+The branch is not merged into main.
 
 ## Purpose
 
@@ -37,7 +47,7 @@ Net::QUIC owns:
 - packet parsing and packet generation
 - connection IDs
 - QUIC expiry calculations
-- future stream state
+- stream state
 
 The integration layer owns:
 
@@ -52,9 +62,11 @@ The public object split is now:
     Net::QUIC::Endpoint
         |
         +-- Net::QUIC::Connection
+                |
+                +-- Net::QUIC::Stream
 
 Endpoint is the UDP/event-loop boundary. Connection is one QUIC connection and
-is where application-facing connection and stream behavior belongs.
+Stream is one application-facing QUIC byte stream.
 
 The integration contract is now concrete:
 
@@ -113,8 +125,8 @@ The UDP socket is still owned by the event-loop integration.
 
 ## CI baseline
 
-GitHub Actions run 36465468171 passed all 15 jobs on stream-proof
-source commit b3e82f8ed23317de0e87385d327eab970d9b1c81:
+GitHub Actions run 36499381840 passed all 15 jobs on the stateless-reset
+checkpoint c691bf69fd3e01665ca1630472edcb6e37c9069d:
 
 - Linux Perl 5.20
 - Linux Perl 5.22
@@ -131,6 +143,8 @@ source commit b3e82f8ed23317de0e87385d327eab970d9b1c81:
 - Linux Perl 5.44
 - macOS Perl 5.44
 - Windows Perl 5.44
+
+The validated suite contains 12 test files and 163 tests.
 
 The endpoint test creates a real native client and requires ngtcp2 to produce a
 real QUIC Initial datagram of at least 1200 bytes.
@@ -334,9 +348,8 @@ Implemented:
 Address validation is optional and off by default so applications do not pay an
 extra Retry round trip unless they request it.
 
-Server work still needed before calling this production-ready:
-
-- stateless-reset policy for unknown connection IDs
+The remaining server-front-door Stateless Reset item is now implemented on
+feature/stateless-reset. Details are recorded below.
 
 Client certificate verification is now implemented on
 feature/client-certificate-verification.
@@ -394,8 +407,8 @@ Lifecycle behavior now is:
 - a retired Connection is also removed from the pending accept queue if the
   application never consumed it
 - every CID route pointing at the retired Connection is removed together
-- replaying an old packet for a retired CID is dropped and does not create a
-  new Connection
+- replaying an old reset-eligible short-header packet for a retired CID does
+  not recreate a Connection and can receive a Stateless Reset
 - the close packet reuses the existing per-Connection transmit buffer, so this
   feature does not add a second large packet buffer to every Connection
 
@@ -426,14 +439,67 @@ Server TLS behavior now is:
 - invalid certificate or private-key paths fail during Endpoint construction
 - no public API change was required
 
+Stateless Reset handling is now implemented on
+feature/stateless-reset.
+
+Validated checkpoint:
+
+- head: c691bf69fd3e01665ca1630472edcb6e37c9069d
+- draft PR: #2
+- GitHub Actions run: 36499381840
+- full 15-job matrix: PASS
+- 12 test files / 163 tests
+- Linux Perl 5.20 through 5.44: PASS
+- macOS: PASS
+- Windows: PASS
+
+Reset policy:
+
+- the server Endpoint owns one private 32-byte server secret
+- the same private secret is used by the existing Retry token machinery and
+  the Stateless Reset token derivation helper, matching ngtcp2's server model
+- the initial server-selected CID receives a reset token in the server
+  transport parameters
+- later server-issued CIDs receive deterministically derived reset tokens in
+  get_new_connection_id2
+- the front door still checks ngtcp2_accept first, so an acceptable Initial can
+  create a new Connection instead of being reset
+- an unknown short-header packet must be at least server CID length + 21 bytes
+  before Net::QUIC will answer with a reset
+- packets of 43 bytes or less get a reset one byte shorter than the trigger
+- larger reset responses use a bounded random prefix and remain smaller than
+  the triggering packet
+- unknown long-header packets are dropped
+- undersized short-header packets are dropped
+- reset generation uses the existing stateless_tx / next_datagram path
+- no Connection is allocated to generate a reset
+- no public API change was required
+- no persistent or user-configurable reset secret was added
+
+Keeping the reset secret Endpoint-private is deliberate for now. It avoids
+sharing one reset key across independent Endpoint instances, which would create
+additional routing/oracle requirements. A persistent or cluster-shared reset
+key can be considered later only if a concrete deployment requires resets to
+survive complete Endpoint/process replacement.
+
+Focused tests prove:
+
+- an undersized unknown short-header packet is silently dropped
+- an unknown long-header packet is silently dropped
+- a sufficiently large unknown short-header packet gets a smaller reset without
+  allocating a Connection
+- after complete server Connection-state loss while the Endpoint secret remains,
+  the client recognizes the derived reset token it was given during handshake
+- after normal Connection retirement and CID route cleanup, a replayed eligible
+  short-header packet receives a reset without recreating Connection state
+
 Next:
 
-1. Decide and implement stateless-reset policy for unknown connection IDs.
-2. Reclaim closed per-stream state when no public object or incoming queue
+1. Reclaim closed per-stream state when no public object or incoming queue
    entry needs it.
-3. Consider fixed-size transmit chunks for earlier ACK memory release.
-4. Write a small Linux::Event adapter after the raw contract is stable.
-5. Keep HTTP/3 out of this transport layer for now.
+2. Consider fixed-size transmit chunks for earlier ACK memory release.
+3. Write a small Linux::Event adapter after the raw contract is stable.
+4. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

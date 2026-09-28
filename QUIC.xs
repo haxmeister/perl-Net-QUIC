@@ -830,7 +830,7 @@ _next_datagram(self)
 
             ep->closebuf_pending = 0;
             RETVAL = net_quic_datagram_new(
-                ep->closebuf,
+                ep->txbuf,
                 ep->closebuflen,
                 &close_local,
                 &close_peer
@@ -1128,8 +1128,8 @@ _close(self, app_error_code_uv = 0)
             ep->conn,
             &ps.path,
             &pi,
-            ep->closebuf,
-            sizeof(ep->closebuf),
+            ep->txbuf,
+            sizeof(ep->txbuf),
             &ccerr,
             now
         );

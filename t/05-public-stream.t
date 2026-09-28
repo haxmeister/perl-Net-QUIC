@@ -4,6 +4,7 @@ use warnings;
 use FindBin ();
 use Socket qw(inet_aton pack_sockaddr_in);
 use Test2::V0;
+use Time::HiRes qw(sleep);
 
 use Net::QUIC::Connection;
 use Net::QUIC::Endpoint;
@@ -47,6 +48,31 @@ sub pump_pair {
     if (defined($server_after) && $server_after <= 0) {
         ++$progress;
         $server->_handle_timeout;
+    }
+
+    if (!$progress) {
+        my $wait;
+
+        for my $after ($client_after, $server_after) {
+            next if !defined($after) || $after <= 0;
+            $wait = $after if !defined($wait) || $after < $wait;
+        }
+
+        if (defined $wait) {
+            sleep($wait + 0.001);
+
+            $client_after = $client->timeout_after;
+            if (defined($client_after) && $client_after <= 0) {
+                ++$progress;
+                $client->handle_timeout;
+            }
+
+            $server_after = $server->_timeout_after;
+            if (defined($server_after) && $server_after <= 0) {
+                ++$progress;
+                $server->_handle_timeout;
+            }
+        }
     }
 
     return $progress;

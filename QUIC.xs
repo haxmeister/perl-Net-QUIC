@@ -419,7 +419,11 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
 
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
-        ep->server_tls_owner = SvREFCNT_inc(server_tls_sv);
+        ep->server_tls_owner = newSVsv(server_tls_sv);
+        if (ep->server_tls_owner == NULL) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to retain shared server TLS context");
+        }
 
         tls_error = net_quic_tls_server_prepare(ep, server_tls);
         if (tls_error != NULL) {

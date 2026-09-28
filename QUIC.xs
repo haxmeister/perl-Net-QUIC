@@ -90,6 +90,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         int rv;
     CODE:
         local = SvPVbyte(local_sv, locallen);
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs args\n"); fflush(stderr);
+#endif
         peer = SvPVbyte(peer_sv, peerlen);
         alpn = SvPVbyte(alpn_sv, alpnlen);
         server_name = SvPVbyte(server_name_sv, server_namelen);
@@ -102,6 +105,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
             croak("server_name must be at most 255 bytes and cannot contain NUL");
         }
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs validated\n"); fflush(stderr);
+#endif
         ep = (net_quic_endpoint *)calloc(1, sizeof(*ep));
         if (ep == NULL) {
             croak("unable to allocate Net::QUIC::Endpoint");
@@ -131,14 +137,23 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
             croak("unable to allocate Net::QUIC::Endpoint strings");
         }
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs addresses strings\n"); fflush(stderr);
+#endif
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs before tls_prepare\n"); fflush(stderr);
+#endif
         if (net_quic_tls_prepare(ep) != 0) {
             net_quic_endpoint_free(ep);
             croak("unable to initialize the selected QUIC TLS backend");
         }
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs after tls_prepare\n"); fflush(stderr);
+#endif
         memset(&callbacks, 0, sizeof(callbacks));
         callbacks.client_initial = ngtcp2_crypto_client_initial_cb;
         callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
@@ -155,11 +170,17 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs before random\n"); fflush(stderr);
+#endif
         if (net_quic_random_bytes(dcid.data, NGTCP2_MIN_INITIAL_DCIDLEN) != 0 ||
             net_quic_random_bytes(scid.data, 16) != 0) {
             net_quic_endpoint_free(ep);
             croak("unable to generate QUIC connection IDs");
         }
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs after random\n"); fflush(stderr);
+#endif
         dcid.datalen = NGTCP2_MIN_INITIAL_DCIDLEN;
         scid.datalen = 16;
 
@@ -181,6 +202,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         path.remote.addr = &ep->peer_addr.sa;
         path.remote.addrlen = ep->peer_addrlen;
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs before conn_new\n"); fflush(stderr);
+#endif
         rv = ngtcp2_conn_client_new(
             &ep->conn,
             &dcid,
@@ -193,16 +217,25 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
             NULL,
             ep
         );
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs after conn_new rv=%d\n", rv); fflush(stderr);
+#endif
         if (rv != 0) {
             net_quic_endpoint_free(ep);
             croak("ngtcp2_conn_client_new failed: %s", ngtcp2_strerror(rv));
         }
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs before tls_finish\n"); fflush(stderr);
+#endif
         if (net_quic_tls_finish(ep) != 0) {
             net_quic_endpoint_free(ep);
             croak("unable to configure the selected QUIC TLS backend");
         }
 
+#ifdef _WIN32
+        fprintf(stderr, "NETQUIC-WIN xs after tls_finish\n"); fflush(stderr);
+#endif
         RETVAL = net_quic_endpoint_bless(class, ep);
     OUTPUT:
         RETVAL

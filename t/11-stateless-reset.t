@@ -175,7 +175,15 @@ $stream->send('r' x 256);
 $stream->finish;
 
 my $probe;
-for (1 .. 100) {
+for (1 .. 500) {
+    while (my $server_datagram = $server->next_datagram) {
+        $client->receive_datagram(
+            $server_datagram->data,
+            $client_local,
+            $server_local,
+        );
+    }
+
     my $datagram = $client->next_datagram;
     if (defined($datagram)) {
         if (
@@ -194,17 +202,22 @@ for (1 .. 100) {
         next;
     }
 
-    my $after = $client->timeout_after;
-    last if !defined $after;
+    my $server_after = $server->timeout_after;
+    my $client_after = $client->timeout_after;
 
-    if ($after > 0) {
-        my $nap = $after > 0.01 ? 0.01 : $after + 0.001;
-        sleep($nap);
-    }
-
+    $server->handle_timeout
+        if defined($server_after) && $server_after <= 0;
     $client->handle_timeout
-        if defined($client->timeout_after)
-        && $client->timeout_after <= 0;
+        if defined($client_after) && $client_after <= 0;
+
+    my @wait = sort { $a <=> $b }
+        grep { defined($_) && $_ > 0 }
+        ($server_after, $client_after);
+
+    last if !@wait;
+
+    my $nap = $wait[0] > 0.01 ? 0.01 : $wait[0] + 0.001;
+    sleep($nap);
 }
 
 ok(defined($probe), 'client produces a reset-eligible short-header packet');

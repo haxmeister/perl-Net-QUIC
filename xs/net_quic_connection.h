@@ -46,7 +46,7 @@ struct net_quic_connection {
 
     uint8_t txbuf[NET_QUIC_TX_BUFSIZE];
 
-ptls_context_t ptls_ctx;
+    ptls_context_t ptls_ctx;
     ngtcp2_crypto_picotls_ctx picotls_ctx;
     ptls_iovec_t picotls_alpn;
 };

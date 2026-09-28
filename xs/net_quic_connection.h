@@ -57,6 +57,7 @@ net_quic_crypto_backend(void)
 typedef struct net_quic_connection net_quic_connection;
 typedef struct net_quic_stream_state net_quic_stream_state;
 typedef struct net_quic_cid_event net_quic_cid_event;
+typedef struct net_quic_server_tls net_quic_server_tls;
 
 struct net_quic_cid_event {
     int add;
@@ -76,6 +77,7 @@ struct net_quic_connection {
     char *alpn;
     size_t alpnlen;
     char *server_name;
+    SV *server_tls_owner;
     int ready;
     int is_server;
     int retired;
@@ -104,10 +106,8 @@ struct net_quic_connection {
     ptls_context_t ptls_ctx;
     ngtcp2_crypto_picotls_ctx picotls_ctx;
     ptls_iovec_t picotls_alpn;
-    ptls_openssl_sign_certificate_t picotls_sign_cert;
     ptls_openssl_verify_certificate_t picotls_verify_cert;
     int picotls_verify_cert_ready;
-    ptls_on_client_hello_t picotls_on_client_hello;
 };
 
 static ngtcp2_tstamp
@@ -386,6 +386,12 @@ net_quic_connection_free(pTHX_ net_quic_connection *ep)
     }
 
     net_quic_tls_cleanup(aTHX_ ep);
+
+    if (ep->server_tls_owner != NULL) {
+        SvREFCNT_dec(ep->server_tls_owner);
+        ep->server_tls_owner = NULL;
+    }
+
     net_quic_streams_free(aTHX_ ep);
     net_quic_cid_events_free(aTHX_ ep);
 

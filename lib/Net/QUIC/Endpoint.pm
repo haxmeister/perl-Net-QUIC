@@ -13,20 +13,24 @@ our $VERSION = $Net::QUIC::VERSION;
 sub client {
     my ($class, %args) = @_;
 
-    for my $name (qw(local peer alpn)) {
+    for my $name (qw(local peer alpn server_name)) {
         croak "missing required $name argument"
             if !defined $args{$name};
     }
 
-    my $server_name = defined $args{server_name}
-        ? $args{server_name}
+    croak "server_name cannot be empty"
+        if $args{server_name} eq '';
+
+    my $ca_file = defined $args{ca_file}
+        ? $args{ca_file}
         : '';
 
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
         $args{peer},
         $args{alpn},
-        $server_name,
+        $args{server_name},
+        $ca_file,
     );
 
     return bless {

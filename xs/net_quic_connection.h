@@ -46,6 +46,8 @@ net_quic_system_free(void *ptr)
 #define NET_QUIC_TX_BUFSIZE 65536
 #define NET_QUIC_SERVER_CIDLEN 16
 #define NET_QUIC_SERVER_SECRET_LEN 32
+#define NET_QUIC_STATELESS_RESET_MAX_RANDLEN \
+    (NGTCP2_MAX_CIDLEN + 22 - NGTCP2_STATELESS_RESET_TOKENLEN)
 #define NET_QUIC_RETRY_TOKEN_TIMEOUT (10 * NGTCP2_SECONDS)
 
 static const char *
@@ -80,6 +82,7 @@ struct net_quic_connection {
     SV *server_tls_owner;
     int ready;
     int is_server;
+    uint8_t server_secret[NET_QUIC_SERVER_SECRET_LEN];
     int retired;
     int close_wait;
     ngtcp2_tstamp retirement_deadline;
@@ -235,7 +238,16 @@ net_quic_get_new_connection_id_cb(
 
     cid->datalen = cidlen;
 
-    if (net_quic_random_bytes(token->data, sizeof(token->data)) != 0) {
+    if (ep->is_server) {
+        if (ngtcp2_crypto_generate_stateless_reset_token(
+                token->data,
+                ep->server_secret,
+                sizeof(ep->server_secret),
+                cid
+            ) != 0) {
+            return NGTCP2_ERR_CALLBACK_FAILURE;
+        }
+    } else if (net_quic_random_bytes(token->data, sizeof(token->data)) != 0) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 

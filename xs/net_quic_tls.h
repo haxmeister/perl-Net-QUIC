@@ -228,9 +228,9 @@ net_quic_tls_cleanup(pTHX_ net_quic_connection *ep)
         }
 
         for (i = 0; i < ep->ptls_ctx.certificates.count; ++i) {
-            free(ep->ptls_ctx.certificates.list[i].base);
+            net_quic_system_free(ep->ptls_ctx.certificates.list[i].base);
         }
-        free(ep->ptls_ctx.certificates.list);
+        net_quic_system_free(ep->ptls_ctx.certificates.list);
         ep->ptls_ctx.certificates.list = NULL;
         ep->ptls_ctx.certificates.count = 0;
     }

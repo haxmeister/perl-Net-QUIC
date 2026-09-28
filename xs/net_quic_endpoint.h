@@ -240,9 +240,11 @@ net_quic_copy_sockaddr(
 }
 
 static char *
-net_quic_strdup_len(const char *src, size_t len)
+net_quic_strdup_len(pTHX_ const char *src, size_t len)
 {
-    char *dest = (char *)malloc(len + 1);
+    char *dest;
+
+    Newx(dest, len + 1, char);
 
     if (dest == NULL) {
         return NULL;
@@ -256,7 +258,7 @@ net_quic_strdup_len(const char *src, size_t len)
 #include "net_quic_tls.h"
 
 static void
-net_quic_endpoint_free(net_quic_endpoint *ep)
+net_quic_endpoint_free(pTHX_ net_quic_endpoint *ep)
 {
     if (ep == NULL) {
         return;
@@ -269,9 +271,9 @@ net_quic_endpoint_free(net_quic_endpoint *ep)
 
     net_quic_tls_cleanup(ep);
 
-    free(ep->alpn);
-    free(ep->server_name);
-    free(ep);
+    Safefree(ep->alpn);
+    Safefree(ep->server_name);
+    Safefree(ep);
 }
 
 static net_quic_endpoint *

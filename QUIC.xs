@@ -124,8 +124,8 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         }
 
         net_quic_trace(aTHX_ "xs validated");
-        ep = (net_quic_endpoint *)calloc(1, sizeof(*ep));
-        net_quic_trace(aTHX_ "xs after calloc");
+        Newxz(ep, 1, net_quic_endpoint);
+        net_quic_trace(aTHX_ "xs after allocation");
         if (ep == NULL) {
             croak("unable to allocate Net::QUIC::Endpoint");
         }
@@ -138,7 +138,7 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
                 locallen
             ) != 0) {
             net_quic_trace(aTHX_ "xs local sockaddr invalid");
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("local must be a packed IPv4 or IPv6 socket address");
         }
         net_quic_trace(aTHX_ "xs after local sockaddr");
@@ -150,18 +150,18 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
                 peerlen
             ) != 0) {
             net_quic_trace(aTHX_ "xs peer sockaddr invalid");
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("peer must be a packed IPv4 or IPv6 socket address");
         }
         net_quic_trace(aTHX_ "xs after peer sockaddr");
 
-        ep->alpn = net_quic_strdup_len(alpn, (size_t)alpnlen);
+        ep->alpn = net_quic_strdup_len(aTHX_ alpn, (size_t)alpnlen);
         net_quic_trace(aTHX_ "xs after alpn copy");
         ep->alpnlen = (size_t)alpnlen;
-        ep->server_name = net_quic_strdup_len(server_name, (size_t)server_namelen);
+        ep->server_name = net_quic_strdup_len(aTHX_ server_name, (size_t)server_namelen);
         net_quic_trace(aTHX_ "xs after server name copy");
         if (ep->alpn == NULL || ep->server_name == NULL) {
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("unable to allocate Net::QUIC::Endpoint strings");
         }
 
@@ -171,7 +171,7 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
 
         net_quic_trace(aTHX_ "xs before tls_prepare");
         if (net_quic_tls_prepare(ep) != 0) {
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("unable to initialize the selected QUIC TLS backend");
         }
 
@@ -195,7 +195,7 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         net_quic_trace(aTHX_ "xs before random");
         if (net_quic_random_bytes(dcid.data, NGTCP2_MIN_INITIAL_DCIDLEN) != 0 ||
             net_quic_random_bytes(scid.data, 16) != 0) {
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("unable to generate QUIC connection IDs");
         }
         net_quic_trace(aTHX_ "xs after random");
@@ -235,13 +235,13 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         );
         net_quic_trace(aTHX_ "xs after conn_new");
         if (rv != 0) {
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("ngtcp2_conn_client_new failed: %s", ngtcp2_strerror(rv));
         }
 
         net_quic_trace(aTHX_ "xs before tls_finish");
         if (net_quic_tls_finish(ep) != 0) {
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             croak("unable to configure the selected QUIC TLS backend");
         }
 
@@ -409,6 +409,6 @@ DESTROY(self)
         inner = SvRV(self);
         ep = INT2PTR(net_quic_endpoint *, SvIV(inner));
         if (ep != NULL) {
-            net_quic_endpoint_free(ep);
+            net_quic_endpoint_free(aTHX_ ep);
             sv_setiv(inner, 0);
         }

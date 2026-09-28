@@ -286,6 +286,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         if (ep == NULL) {
             croak("unable to allocate Net::QUIC::Connection");
         }
+        ep->is_server = 1;
 
         if (net_quic_copy_sockaddr(
                 &ep->local_addr,

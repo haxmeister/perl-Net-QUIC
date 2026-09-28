@@ -10,6 +10,17 @@ use Net::QUIC::Endpoint;
 my $local = pack_sockaddr_in(40000, inet_aton('127.0.0.1'));
 my $peer  = pack_sockaddr_in(4433, inet_aton('127.0.0.1'));
 
+if ($^O eq 'MSWin32') {
+    warn "NETQUIC-WIN before arg probe\n";
+    my $probe = Net::QUIC::Endpoint->_arg_probe(
+        $local,
+        $peer,
+        'net-quic-test',
+        'localhost',
+    );
+    warn "NETQUIC-WIN arg probe=$probe\n";
+}
+
 warn "NETQUIC-WIN before client\n" if $^O eq 'MSWin32';
 my $endpoint = Net::QUIC::Endpoint->client(
     local       => $local,

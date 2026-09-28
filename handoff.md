@@ -10,7 +10,7 @@ feature/initial-native-core
 
 Current implementation head before this handoff update:
 
-1b63857a1505c9de58af87990b676d222cabee77
+ab964def0742c745b71671f4daf63ddfd2245ec7
 
 ## Purpose
 
@@ -39,6 +39,15 @@ The integration layer owns:
 - one timer
 - the surrounding event loop
 
+The public object split is now:
+
+    Net::QUIC::Endpoint
+        |
+        +-- Net::QUIC::Connection
+
+Endpoint is the UDP/event-loop boundary. Connection is one QUIC connection and
+is where application-facing connection and stream behavior belongs.
+
 The integration contract is now concrete:
 
     $endpoint->receive_datagram($bytes, $local, $peer);
@@ -66,6 +75,7 @@ Development version:
 The branch now contains:
 
 - Net::QUIC::Endpoint
+- Net::QUIC::Connection
 - Net::QUIC::Datagram
 - a native client QUIC connection using ngtcp2
 - provider-neutral TLS setup below the Perl API
@@ -86,12 +96,14 @@ A client endpoint is created with:
         server_name => 'example.com',
     );
 
+    my $connection = $endpoint->connection;
+
 The UDP socket is still owned by the event-loop integration.
 
 ## CI baseline
 
-GitHub Actions run 36366017651 passed all 15 jobs on the cleaned production
-endpoint code:
+GitHub Actions run 36366552646 passed all 15 jobs after the
+Endpoint/Connection split:
 
 - Linux Perl 5.20
 - Linux Perl 5.22
@@ -167,14 +179,14 @@ The event-loop boundary itself is now implemented and tested.
 
 Next work should build upward from this without changing that boundary:
 
-1. Exercise receive_datagram with an actual peer response and complete a client
-   handshake in an integration test.
-2. Add stream callbacks/state needed for incoming and outgoing QUIC streams.
-3. Define the friendly Net::QUIC::Connection and Net::QUIC::Stream API on top
-   of the native endpoint.
-4. Add server-side endpoint/demultiplexing support.
-5. After the raw contract is stable, write a small Linux::Event adapter as the
-   first framework integration example.
+1. Add a private server-side Connection constructor used only by tests.
+2. Exchange client and server datagrams entirely in memory and complete a real
+   QUIC/TLS handshake, proving receive_datagram as well as packet generation.
+3. Add stream callbacks/state needed for incoming and outgoing QUIC streams.
+4. Design the public server Endpoint around CID routing and multiple Connection
+   objects after the low-level server connection path is proven.
+5. Write a small Linux::Event adapter as the first framework integration
+   example after the raw contract is stable.
 6. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene

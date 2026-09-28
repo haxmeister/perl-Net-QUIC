@@ -95,7 +95,10 @@ server certificate chains and host names by default using Picotls and OpenSSL.
 Finished server Connections are retired automatically after QUIC's closing or
 draining period, together with all of their CID routes. Server TLS credentials
 are loaded once per Endpoint and shared by accepted Connection sessions.
-Stateless reset policy for unknown connection IDs is not implemented yet.
+The server also handles lost or retired server-issued connection IDs
+statelessly. A sufficiently large unknown short-header packet can receive a
+Stateless Reset without recreating Connection state; unknown long-header and
+undersized packets are dropped.
 
 =head1 SEE ALSO
 

@@ -665,6 +665,53 @@ _stream_info(self, stream_id_iv)
         RETVAL
 
 void
+_stream_retain(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (net_quic_stream_retain(stream) != 0) {
+            croak("too many Net::QUIC::Stream references");
+        }
+
+void
+_stream_release(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            XSRETURN_EMPTY;
+        }
+
+        if (net_quic_stream_release(aTHX_ ep, stream) != 0) {
+            croak("Net::QUIC::Stream reference count underflow");
+        }
+
+UV
+_stream_state_count(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = (UV)net_quic_stream_count(ep);
+    OUTPUT:
+        RETVAL
+
+void
 _stream_send(self, stream_id_iv, data_sv)
     SV *self
     IV stream_id_iv
@@ -835,6 +882,7 @@ _stream_reset(self, stream_id_iv, app_error_code_uv)
         }
 
         stream->write_shutdown = 1;
+        net_quic_stream_reclaim_closed(aTHX_ ep);
 
 void
 _queue_stream_data(self, stream_id_iv, data_sv, fin)
@@ -1063,6 +1111,7 @@ _next_datagram(self)
         }
 
         next_datagram_done:
+        net_quic_stream_reclaim_closed(aTHX_ ep);
         ;
     OUTPUT:
         RETVAL
@@ -1133,6 +1182,8 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
             croak("ngtcp2_conn_read_pkt failed: %s", ngtcp2_strerror(rv));
         }
 
+        net_quic_stream_reclaim_closed(aTHX_ ep);
+
 SV *
 _timeout_after(self)
     SV *self
@@ -1199,6 +1250,8 @@ _handle_timeout(self)
                    ngtcp2_conn_in_draining_period2(ep->conn)) {
             net_quic_start_close_wait(ep, now);
         }
+
+        net_quic_stream_reclaim_closed(aTHX_ ep);
 
 void
 _close(self, app_error_code_uv = 0)

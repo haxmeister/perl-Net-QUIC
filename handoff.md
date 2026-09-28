@@ -2,7 +2,7 @@
 
 ## Current branch
 
-feature/handshake-proof
+feature/stream-proof
 
 Baseline before the Picotls-only cleanup:
 
@@ -77,6 +77,7 @@ The branch now contains:
 - a private test-only native server QUIC connection
 - one Picotls TLS implementation below the Perl API
 - a real in-memory client/server QUIC/TLS handshake proof
+- a real private bidirectional stream transport proof
 - receive_datagram
 - next_datagram
 - timeout_after
@@ -100,8 +101,8 @@ The UDP socket is still owned by the event-loop integration.
 
 ## CI baseline
 
-GitHub Actions run 36404934969 passed all 15 jobs on handshake-proof
-source commit 11211aedb5228f9c109960e35c01ee66e4d18a57:
+GitHub Actions run 36406776408 passed all 15 jobs on stream-proof
+source commit af12f289ebbfcb6bda22d81cb9b36ed16bd76c3d:
 
 - Linux Perl 5.20
 - Linux Perl 5.22
@@ -124,8 +125,43 @@ real QUIC Initial datagram of at least 1200 bytes.
 
 The handshake test creates a real client and a private test-only server, loads a
 test certificate and private key, exchanges QUIC datagrams entirely in memory,
-and requires both sides to complete the QUIC/TLS handshake. On Windows the
-final run reports t/03-handshake.t as successful and finishes teardown normally.
+and requires both sides to complete the QUIC/TLS handshake.
+
+The stream test then opens a real client-initiated bidirectional QUIC stream,
+sends a multi-packet request with FIN, receives it completely on the server, and
+sends a response with FIN back on the same stream. The final matrix reports
+t/04-stream.t successful on every Linux Perl from 5.20 through 5.44, macOS
+5.44, and Windows 5.44.
+
+## Stream transport proof
+
+The current stream methods are deliberately private development methods:
+
+    _open_bidi_stream
+    _queue_stream_data
+    _take_stream_data
+
+They prove that stream bytes, FIN, receive flow-control credit, and packet
+generation work through the existing Endpoint datagram boundary. They are not
+the public Net::QUIC::Stream API.
+
+The proof uncovered two transport details that must be preserved.
+
+First, receive offsets are absolute stream offsets. Receive state must remember
+the next absolute offset across separate callbacks instead of treating every
+callback as a new zero-based buffer.
+
+Second, ngtcp2 packet transmit time must be updated after a drained packet batch,
+not after every packet. Endpoint callers already drain next_datagram until it
+returns undef. Net::QUIC now marks a transmit batch active while packets are
+being returned and calls ngtcp2_conn_update_pkt_tx_time only when the batch is
+drained.
+
+The proof still has intentionally temporary single-stream storage: one send
+buffer and one receive accumulator per Connection. Sent stream bytes are kept
+unchanged for the lifetime of the Connection. The public stream implementation
+must replace this with independent per-stream state and immutable send buffers
+that are released only after acknowledgement or stream close.
 
 ## Windows portability findings
 
@@ -188,23 +224,23 @@ from 5.20 through 5.44 remains intact, along with macOS and Windows coverage.
 
 ## Next useful work
 
-The event-loop boundary is implemented and tested.
-
-The Picotls-only client path and the private in-memory client/server handshake
-proof are green across the full 15-job CI matrix.
+The event-loop boundary, Picotls handshake, and bidirectional stream transport
+are implemented and tested across the full 15-job CI matrix.
 
 The private _server_new constructor is only a development proof. Do not turn it
 into the public server API directly.
 
 Next:
 
-1. Add the stream callbacks and state needed for incoming and outgoing QUIC
-   streams.
-2. Design the public server Endpoint around CID routing and multiple Connection
+1. Replace the single-stream proof storage with independent per-stream native
+   state and immutable acknowledged send buffers.
+2. Build the public Net::QUIC::Stream object on that state, including local
+   stream opening, remote stream discovery, send, receive, FIN, and reset.
+3. Design the public server Endpoint around CID routing and multiple Connection
    objects, keeping the private proof constructor private.
-3. Write a small Linux::Event adapter as the first framework integration
+4. Write a small Linux::Event adapter as the first framework integration
    example after the raw contract is stable.
-4. Keep HTTP/3 out of this transport layer for now.
+5. Keep HTTP/3 out of this transport layer for now.
 
 Certificate verification is still future work. The current client proof does
 not configure production server-certificate verification, so the self-signed

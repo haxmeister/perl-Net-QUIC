@@ -10,6 +10,7 @@ use Net::QUIC::Endpoint;
 my $local = pack_sockaddr_in(40000, inet_aton('127.0.0.1'));
 my $peer  = pack_sockaddr_in(4433, inet_aton('127.0.0.1'));
 
+warn "NETQUIC-WIN before client\n" if $^O eq 'MSWin32';
 my $endpoint = Net::QUIC::Endpoint->client(
     local       => $local,
     peer        => $peer,
@@ -17,10 +18,13 @@ my $endpoint = Net::QUIC::Endpoint->client(
     server_name => 'localhost',
 );
 
+warn "NETQUIC-WIN after client\n" if $^O eq 'MSWin32';
 isa_ok($endpoint, ['Net::QUIC::Endpoint'], 'client endpoint is created');
 ok(!$endpoint->ready, 'new client is not ready before the handshake');
 
+warn "NETQUIC-WIN before next_datagram\n" if $^O eq 'MSWin32';
 my $datagram = $endpoint->next_datagram;
+warn "NETQUIC-WIN after next_datagram\n" if $^O eq 'MSWin32';
 isa_ok($datagram, ['Net::QUIC::Datagram'], 'client produces an initial datagram');
 
 ok(length($datagram->data) >= 1200, 'initial QUIC datagram is at least 1200 bytes');
@@ -36,5 +40,9 @@ like(
     qr/missing required alpn argument/,
     'client constructor explains a missing required argument',
 );
+
+warn "NETQUIC-WIN before endpoint destroy\n" if $^O eq 'MSWin32';
+undef $endpoint;
+warn "NETQUIC-WIN after endpoint destroy\n" if $^O eq 'MSWin32';
 
 done_testing;

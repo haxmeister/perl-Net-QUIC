@@ -42,6 +42,7 @@ net_quic_system_free(void *ptr)
 #include <picotls/openssl.h>
 
 #define NET_QUIC_TX_BUFSIZE 65536
+#define NET_QUIC_SERVER_CIDLEN 16
 
 static const char *
 net_quic_crypto_backend(void)
@@ -51,6 +52,13 @@ net_quic_crypto_backend(void)
 
 typedef struct net_quic_connection net_quic_connection;
 typedef struct net_quic_stream_state net_quic_stream_state;
+typedef struct net_quic_cid_event net_quic_cid_event;
+
+struct net_quic_cid_event {
+    int add;
+    ngtcp2_cid cid;
+    net_quic_cid_event *next;
+};
 
 struct net_quic_connection {
     ngtcp2_conn *conn;
@@ -66,6 +74,9 @@ struct net_quic_connection {
     char *server_name;
     int ready;
     int is_server;
+
+    net_quic_cid_event *cid_event_head;
+    net_quic_cid_event *cid_event_tail;
 
     uint8_t txbuf[NET_QUIC_TX_BUFSIZE];
     int tx_batch_active;
@@ -130,6 +141,48 @@ net_quic_rand_cb(uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx)
 }
 
 static int
+net_quic_queue_cid_event(
+    pTHX_ net_quic_connection *ep,
+    int add,
+    const ngtcp2_cid *cid
+)
+{
+    net_quic_cid_event *event;
+
+    Newxz(event, 1, net_quic_cid_event);
+    if (event == NULL) {
+        return -1;
+    }
+
+    event->add = add ? 1 : 0;
+    event->cid = *cid;
+
+    if (ep->cid_event_tail != NULL) {
+        ep->cid_event_tail->next = event;
+    } else {
+        ep->cid_event_head = event;
+    }
+    ep->cid_event_tail = event;
+
+    return 0;
+}
+
+static void
+net_quic_cid_events_free(pTHX_ net_quic_connection *ep)
+{
+    net_quic_cid_event *event;
+    net_quic_cid_event *next;
+
+    for (event = ep->cid_event_head; event != NULL; event = next) {
+        next = event->next;
+        Safefree(event);
+    }
+
+    ep->cid_event_head = NULL;
+    ep->cid_event_tail = NULL;
+}
+
+static int
 net_quic_get_new_connection_id_cb(
     ngtcp2_conn *conn,
     ngtcp2_cid *cid,
@@ -138,10 +191,13 @@ net_quic_get_new_connection_id_cb(
     void *user_data
 )
 {
-    (void)conn;
-    (void)user_data;
+    dTHX;
+    net_quic_connection *ep = (net_quic_connection *)user_data;
 
-    if (cidlen > sizeof(cid->data)) {
+    (void)conn;
+
+    if (cidlen > sizeof(cid->data) ||
+        (ep->is_server && cidlen != NET_QUIC_SERVER_CIDLEN)) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
@@ -155,7 +211,33 @@ net_quic_get_new_connection_id_cb(
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
+    if (ep->is_server &&
+        net_quic_queue_cid_event(aTHX_ ep, 1, cid) != 0) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
     return 0;
+}
+
+static int
+net_quic_remove_connection_id_cb(
+    ngtcp2_conn *conn,
+    const ngtcp2_cid *cid,
+    void *user_data
+)
+{
+    dTHX;
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+
+    (void)conn;
+
+    if (!ep->is_server) {
+        return 0;
+    }
+
+    return net_quic_queue_cid_event(aTHX_ ep, 0, cid) == 0
+        ? 0
+        : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 static int
@@ -234,6 +316,7 @@ net_quic_connection_free(pTHX_ net_quic_connection *ep)
 
     net_quic_tls_cleanup(aTHX_ ep);
     net_quic_streams_free(aTHX_ ep);
+    net_quic_cid_events_free(aTHX_ ep);
 
     Safefree(ep->alpn);
     Safefree(ep->server_name);

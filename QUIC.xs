@@ -348,11 +348,12 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         callbacks.delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb;
         callbacks.version_negotiation = ngtcp2_crypto_version_negotiation_cb;
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
+        callbacks.remove_connection_id = net_quic_remove_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
 
         ngtcp2_cid_init(&dcid, vcid.scid, vcid.scidlen);
 
-        scid.datalen = 16;
+        scid.datalen = NET_QUIC_SERVER_CIDLEN;
         if (net_quic_random_bytes(scid.data, scid.datalen) != 0) {
             net_quic_connection_free(aTHX_ ep);
             croak("unable to generate server QUIC connection ID");
@@ -393,6 +394,11 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         if (rv != 0) {
             net_quic_connection_free(aTHX_ ep);
             croak("ngtcp2_conn_server_new failed: %s", ngtcp2_strerror(rv));
+        }
+
+        if (net_quic_queue_cid_event(aTHX_ ep, 1, &scid) != 0) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to register server QUIC connection ID");
         }
 
         if (net_quic_tls_server_finish(aTHX_ ep) != 0) {
@@ -967,6 +973,40 @@ ready(self)
     OUTPUT:
         RETVAL
 
+SV *
+_take_cid_event(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_cid_event *event;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        event = ep->cid_event_head;
+
+        if (event == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            ep->cid_event_head = event->next;
+            if (ep->cid_event_head == NULL) {
+                ep->cid_event_tail = NULL;
+            }
+
+            av = newAV();
+            av_push(av, newSViv(event->add ? 1 : 0));
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)event->cid.data,
+                    (STRLEN)event->cid.datalen
+                )
+            );
+            RETVAL = newRV_noinc((SV *)av);
+            Safefree(event);
+        }
+    OUTPUT:
+        RETVAL
+
 void
 DESTROY(self)
     SV *self
@@ -984,3 +1024,86 @@ DESTROY(self)
             net_quic_connection_free(aTHX_ ep);
             sv_setiv(inner, 0);
         }
+
+MODULE = Net::QUIC    PACKAGE = Net::QUIC::Endpoint
+
+UV
+_server_cid_length(class)
+    const char *class
+    CODE:
+        (void)class;
+        RETVAL = NET_QUIC_SERVER_CIDLEN;
+    OUTPUT:
+        RETVAL
+
+SV *
+_packet_dcid(class, data_sv, short_dcidlen_uv)
+    const char *class
+    SV *data_sv
+    UV short_dcidlen_uv
+    PREINIT:
+        const char *data;
+        STRLEN datalen;
+        ngtcp2_version_cid vcid;
+        int rv;
+    CODE:
+        (void)class;
+        data = SvPVbyte(data_sv, datalen);
+
+        if (short_dcidlen_uv > NGTCP2_MAX_CIDLEN) {
+            croak("short QUIC connection ID length is too large");
+        }
+
+        memset(&vcid, 0, sizeof(vcid));
+        rv = ngtcp2_pkt_decode_version_cid(
+            &vcid,
+            (const uint8_t *)data,
+            (size_t)datalen,
+            (size_t)short_dcidlen_uv
+        );
+
+        if (rv != 0 && rv != NGTCP2_ERR_VERSION_NEGOTIATION) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVpvn((const char *)vcid.dcid, (STRLEN)vcid.dcidlen);
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+_initial_dcid(class, data_sv)
+    const char *class
+    SV *data_sv
+    PREINIT:
+        const char *data;
+        STRLEN datalen;
+        ngtcp2_version_cid vcid;
+        ngtcp2_pkt_hd hd;
+        int rv;
+    CODE:
+        (void)class;
+        data = SvPVbyte(data_sv, datalen);
+
+        memset(&hd, 0, sizeof(hd));
+        rv = ngtcp2_accept(&hd, (const uint8_t *)data, (size_t)datalen);
+        if (rv != 0) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            memset(&vcid, 0, sizeof(vcid));
+            rv = ngtcp2_pkt_decode_version_cid(
+                &vcid,
+                (const uint8_t *)data,
+                (size_t)datalen,
+                0
+            );
+            if (rv != 0 && rv != NGTCP2_ERR_VERSION_NEGOTIATION) {
+                RETVAL = &PL_sv_undef;
+            } else {
+                RETVAL = newSVpvn(
+                    (const char *)vcid.dcid,
+                    (STRLEN)vcid.dcidlen
+                );
+            }
+        }
+    OUTPUT:
+        RETVAL

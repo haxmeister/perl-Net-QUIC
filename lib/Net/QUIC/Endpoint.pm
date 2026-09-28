@@ -30,32 +30,181 @@ sub client {
     );
 
     return bless {
+        mode       => 'client',
         connection => $connection,
     }, $class;
 }
 
+sub server {
+    my ($class, %args) = @_;
+
+    for my $name (qw(alpn certificate_file private_key_file)) {
+        croak "missing required $name argument"
+            if !defined $args{$name};
+    }
+
+    return bless {
+        mode                => 'server',
+        alpn                => $args{alpn},
+        certificate_file    => $args{certificate_file},
+        private_key_file    => $args{private_key_file},
+        cid_length          => $class->_server_cid_length,
+        routes              => {},
+        connections         => [],
+        pending_connections => [],
+        tx_cursor           => 0,
+    }, $class;
+}
+
+sub _sync_server_routes {
+    my ($self, $connection) = @_;
+
+    while (my $event = $connection->_take_cid_event) {
+        my ($add, $cid) = @$event;
+
+        if ($add) {
+            $self->{routes}{$cid} = $connection;
+        } else {
+            delete $self->{routes}{$cid};
+        }
+    }
+
+    return;
+}
+
+sub _server_receive_datagram {
+    my ($self, $bytes, $local, $peer) = @_;
+
+    my $dcid = $self->_packet_dcid($bytes, $self->{cid_length});
+    return if !defined $dcid;
+
+    my $connection = $self->{routes}{$dcid};
+
+    if (!$connection) {
+        my $initial_dcid = $self->_initial_dcid($bytes);
+        return if !defined $initial_dcid;
+
+        $connection = Net::QUIC::Connection->_server_new(
+            $bytes,
+            $local,
+            $peer,
+            $self->{alpn},
+            $self->{certificate_file},
+            $self->{private_key_file},
+        );
+
+        $self->{routes}{$initial_dcid} = $connection;
+        push @{$self->{connections}}, $connection;
+        push @{$self->{pending_connections}}, $connection;
+        $self->_sync_server_routes($connection);
+    }
+
+    $connection->_receive_datagram($bytes, $local, $peer);
+    $self->_sync_server_routes($connection);
+    return;
+}
+
+sub _server_next_datagram {
+    my ($self) = @_;
+    my $connections = $self->{connections};
+    my $count = @$connections;
+
+    return if !$count;
+
+    for (1 .. $count) {
+        my $index = $self->{tx_cursor} % $count;
+        $self->{tx_cursor} = ($index + 1) % $count;
+
+        my $connection = $connections->[$index];
+        my $datagram = $connection->_next_datagram;
+        $self->_sync_server_routes($connection);
+
+        return $datagram if defined $datagram;
+    }
+
+    return;
+}
+
+sub _server_timeout_after {
+    my ($self) = @_;
+    my $minimum;
+
+    for my $connection (@{$self->{connections}}) {
+        my $after = $connection->_timeout_after;
+        next if !defined $after;
+
+        $minimum = $after
+            if !defined($minimum) || $after < $minimum;
+    }
+
+    return $minimum;
+}
+
+sub _server_handle_timeout {
+    my ($self) = @_;
+
+    for my $connection (@{$self->{connections}}) {
+        my $after = $connection->_timeout_after;
+        next if !defined($after) || $after > 0;
+
+        $connection->_handle_timeout;
+        $self->_sync_server_routes($connection);
+    }
+
+    return;
+}
+
 sub connection {
     my ($self) = @_;
+
+    croak "server endpoint manages multiple connections; use next_connection"
+        if $self->{mode} eq 'server';
+
     return $self->{connection};
+}
+
+sub next_connection {
+    my ($self) = @_;
+
+    croak "next_connection is only available on a server endpoint"
+        if $self->{mode} ne 'server';
+
+    return shift @{$self->{pending_connections}};
 }
 
 sub receive_datagram {
     my ($self, @args) = @_;
+
+    return $self->_server_receive_datagram(@args)
+        if $self->{mode} eq 'server';
+
     return $self->{connection}->_receive_datagram(@args);
 }
 
 sub next_datagram {
     my ($self) = @_;
+
+    return $self->_server_next_datagram
+        if $self->{mode} eq 'server';
+
     return $self->{connection}->_next_datagram;
 }
 
 sub timeout_after {
     my ($self) = @_;
+
+    return $self->_server_timeout_after
+        if $self->{mode} eq 'server';
+
     return $self->{connection}->_timeout_after;
 }
 
 sub handle_timeout {
     my ($self) = @_;
+
+    return $self->_server_handle_timeout
+        if $self->{mode} eq 'server';
+
     return $self->{connection}->_handle_timeout;
 }
 

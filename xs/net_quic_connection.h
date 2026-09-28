@@ -39,6 +39,7 @@ net_quic_system_free(void *ptr)
 #include <ngtcp2/ngtcp2_crypto_picotls.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
+#include <openssl/x509_vfy.h>
 #include <picotls.h>
 #include <picotls/openssl.h>
 
@@ -94,6 +95,8 @@ struct net_quic_connection {
     ngtcp2_crypto_picotls_ctx picotls_ctx;
     ptls_iovec_t picotls_alpn;
     ptls_openssl_sign_certificate_t picotls_sign_cert;
+    ptls_openssl_verify_certificate_t picotls_verify_cert;
+    int picotls_verify_cert_ready;
     ptls_on_client_hello_t picotls_on_client_hello;
 };
 

@@ -31,24 +31,43 @@ net_quic_tls_context_defaults(net_quic_connection *ep)
     ep->ptls_ctx.require_dhe_on_psk = 1;
 }
 
-static int
-net_quic_tls_client_prepare(net_quic_connection *ep)
+static const char *
+net_quic_tls_client_prepare(net_quic_connection *ep, const char *ca_file)
 {
     net_quic_tls_context_defaults(ep);
 
     if (ngtcp2_crypto_picotls_configure_client_context(&ep->ptls_ctx) != 0) {
-        return -1;
+        return "unable to configure Picotls client context";
     }
+
+    if (ptls_openssl_init_verify_certificate(
+            &ep->picotls_verify_cert,
+            NULL
+        ) != 0) {
+        return "unable to initialize Picotls certificate verifier";
+    }
+    ep->picotls_verify_cert_ready = 1;
+
+    if (ca_file[0] != '\0' &&
+        X509_STORE_load_locations(
+            ep->picotls_verify_cert.cert_store,
+            ca_file,
+            NULL
+        ) != 1) {
+        return "unable to load client CA file";
+    }
+
+    ep->ptls_ctx.verify_certificate = &ep->picotls_verify_cert.super;
 
     ngtcp2_crypto_picotls_ctx_init(&ep->picotls_ctx);
     ep->picotls_ctx.ptls = ptls_client_new(&ep->ptls_ctx);
     if (ep->picotls_ctx.ptls == NULL) {
-        return -1;
+        return "unable to create Picotls client session";
     }
 
     *ptls_get_data_ptr(ep->picotls_ctx.ptls) = &ep->conn_ref;
 
-    return 0;
+    return NULL;
 }
 
 static int
@@ -220,6 +239,12 @@ net_quic_tls_cleanup(pTHX_ net_quic_connection *ep)
         *ptls_get_data_ptr(ep->picotls_ctx.ptls) = NULL;
         ptls_free(ep->picotls_ctx.ptls);
         ep->picotls_ctx.ptls = NULL;
+    }
+
+    if (!ep->is_server && ep->picotls_verify_cert_ready) {
+        ptls_openssl_dispose_verify_certificate(&ep->picotls_verify_cert);
+        ep->picotls_verify_cert.cert_store = NULL;
+        ep->picotls_verify_cert_ready = 0;
     }
 
     if (ep->is_server) {

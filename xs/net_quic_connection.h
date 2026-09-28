@@ -75,8 +75,10 @@ struct net_quic_connection {
     size_t stream_tx_sent;
     int stream_tx_fin;
 
+    int stream_rx_seen;
     int stream_rx_pending;
     int64_t stream_rx_id;
+    uint64_t stream_rx_next_offset;
     uint8_t *stream_rx_data;
     size_t stream_rx_len;
     size_t stream_rx_cap;
@@ -194,17 +196,20 @@ net_quic_recv_stream_data_cb(
     (void)conn;
     (void)stream_user_data;
 
-    if (!ep->stream_rx_pending) {
-        ep->stream_rx_pending = 1;
+    if (!ep->stream_rx_seen) {
+        ep->stream_rx_seen = 1;
         ep->stream_rx_id = stream_id;
+        ep->stream_rx_next_offset = 0;
     } else if (ep->stream_rx_id != stream_id) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
-    if (offset != (uint64_t)ep->stream_rx_len ||
+    if (offset != ep->stream_rx_next_offset ||
         datalen > SIZE_MAX - ep->stream_rx_len) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
+
+    ep->stream_rx_pending = 1;
 
     needed = ep->stream_rx_len + datalen;
     if (needed > ep->stream_rx_cap) {
@@ -228,6 +233,7 @@ net_quic_recv_stream_data_cb(
     if (datalen != 0) {
         memcpy(ep->stream_rx_data + ep->stream_rx_len, data, datalen);
         ep->stream_rx_len += datalen;
+        ep->stream_rx_next_offset += (uint64_t)datalen;
     }
 
     if ((flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0) {

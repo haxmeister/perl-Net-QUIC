@@ -90,31 +90,45 @@ ok($stream_id >= 0, 'client opens a real bidirectional QUIC stream');
 my $request = join '', map { "request-$_\n" } 1 .. 1200;
 $client->connection->_queue_stream_data($stream_id, $request, 1);
 
-my $server_event;
-for (1 .. 100) {
+my $server_received = '';
+my $server_fin = 0;
+my $server_stream_id;
+for (1 .. 200) {
     pump_pair($client, $server);
-    $server_event = $server->_take_stream_data;
-    last if defined($server_event) && $server_event->[2];
+
+    while (my $event = $server->_take_stream_data) {
+        $server_stream_id = $event->[0];
+        $server_received .= $event->[1];
+        $server_fin ||= $event->[2];
+    }
+
+    last if $server_fin;
 }
 
-ok(defined($server_event), 'server receives stream data');
-is($server_event->[0], $stream_id, 'server receives the opened stream id');
-is($server_event->[1], $request, 'server receives the complete multi-packet payload');
-ok($server_event->[2], 'server receives client FIN');
+is($server_stream_id, $stream_id, 'server receives the opened stream id');
+is($server_received, $request, 'server receives the complete multi-packet payload');
+ok($server_fin, 'server receives client FIN');
 
 my $response = "stream-response\n";
 $server->_queue_stream_data($stream_id, $response, 1);
 
-my $client_event;
-for (1 .. 100) {
+my $client_received = '';
+my $client_fin = 0;
+my $client_stream_id;
+for (1 .. 200) {
     pump_pair($client, $server);
-    $client_event = $client->connection->_take_stream_data;
-    last if defined($client_event) && $client_event->[2];
+
+    while (my $event = $client->connection->_take_stream_data) {
+        $client_stream_id = $event->[0];
+        $client_received .= $event->[1];
+        $client_fin ||= $event->[2];
+    }
+
+    last if $client_fin;
 }
 
-ok(defined($client_event), 'client receives stream response');
-is($client_event->[0], $stream_id, 'client response stays on the same bidi stream');
-is($client_event->[1], $response, 'client receives the response bytes');
-ok($client_event->[2], 'client receives server FIN');
+is($client_stream_id, $stream_id, 'client response stays on the same bidi stream');
+is($client_received, $response, 'client receives the response bytes');
+ok($client_fin, 'client receives server FIN');
 
 done_testing;

@@ -222,14 +222,16 @@ net_quic_tls_cleanup(pTHX_ net_quic_connection *ep)
         ep->picotls_ctx.ptls = NULL;
     }
 
-    if (ep->picotls_sign_cert.key != NULL) {
-        ptls_openssl_dispose_sign_certificate(&ep->picotls_sign_cert);
-    }
+    if (ep->is_server) {
+        if (ep->picotls_sign_cert.key != NULL) {
+            ptls_openssl_dispose_sign_certificate(&ep->picotls_sign_cert);
+        }
 
-    for (i = 0; i < ep->ptls_ctx.certificates.count; ++i) {
-        free(ep->ptls_ctx.certificates.list[i].base);
+        for (i = 0; i < ep->ptls_ctx.certificates.count; ++i) {
+            free(ep->ptls_ctx.certificates.list[i].base);
+        }
+        free(ep->ptls_ctx.certificates.list);
+        ep->ptls_ctx.certificates.list = NULL;
+        ep->ptls_ctx.certificates.count = 0;
     }
-    free(ep->ptls_ctx.certificates.list);
-    ep->ptls_ctx.certificates.list = NULL;
-    ep->ptls_ctx.certificates.count = 0;
 }

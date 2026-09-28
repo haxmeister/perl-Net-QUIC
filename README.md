@@ -188,7 +188,11 @@ constructed. Accepted Connections create their own Picotls sessions from that
 shared TLS context, so the credential files are not reopened for each client
 and do not need to remain readable after Endpoint construction.
 
-Stateless reset policy for unknown connection IDs is still under development.
+After Connection state is gone, a sufficiently large short-header packet for
+an unknown destination connection ID can receive a Stateless Reset. Reset
+tokens are derived from an Endpoint-private secret and the server-issued
+connection ID, so the Endpoint can answer without recreating Connection state.
+Unknown long-header packets and packets too small for a safe reset are dropped.
 
 ## Native dependency
 

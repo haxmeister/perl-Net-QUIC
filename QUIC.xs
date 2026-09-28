@@ -64,32 +64,15 @@ _crypto_self_test()
 
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Endpoint
 
-int
-_arg_probe(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
-    SV *class_sv
-    SV *local_sv
-    SV *peer_sv
-    SV *alpn_sv
-    SV *server_name_sv
-    CODE:
-        RETVAL = SvOK(class_sv)
-            && SvOK(local_sv)
-            && SvOK(peer_sv)
-            && SvOK(alpn_sv)
-            && SvOK(server_name_sv);
-    OUTPUT:
-        RETVAL
-
 SV *
-_client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
-    SV *class_sv
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
+    const char *class
     SV *local_sv
     SV *peer_sv
     SV *alpn_sv
     SV *server_name_sv
     PREINIT:
         net_quic_endpoint *ep = NULL;
-        const char *class;
         const char *local;
         const char *peer;
         const char *alpn;
@@ -106,11 +89,7 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         ngtcp2_cid scid;
         int rv;
     CODE:
-        net_quic_trace(aTHX_ "xs entry");
-        class = SvPV_nolen(class_sv);
-        net_quic_trace(aTHX_ "xs class");
         local = SvPVbyte(local_sv, locallen);
-        net_quic_trace(aTHX_ "xs args");
         peer = SvPVbyte(peer_sv, peerlen);
         alpn = SvPVbyte(alpn_sv, alpnlen);
         server_name = SvPVbyte(server_name_sv, server_namelen);
@@ -123,25 +102,20 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
             croak("server_name must be at most 255 bytes and cannot contain NUL");
         }
 
-        net_quic_trace(aTHX_ "xs validated");
         Newxz(ep, 1, net_quic_endpoint);
-        net_quic_trace(aTHX_ "xs after allocation");
         if (ep == NULL) {
             croak("unable to allocate Net::QUIC::Endpoint");
         }
 
-        net_quic_trace(aTHX_ "xs before local sockaddr");
         if (net_quic_copy_sockaddr(
                 &ep->local_addr,
                 &ep->local_addrlen,
                 local,
                 locallen
             ) != 0) {
-            net_quic_trace(aTHX_ "xs local sockaddr invalid");
             net_quic_endpoint_free(aTHX_ ep);
             croak("local must be a packed IPv4 or IPv6 socket address");
         }
-        net_quic_trace(aTHX_ "xs after local sockaddr");
 
         if (net_quic_copy_sockaddr(
                 &ep->peer_addr,
@@ -149,33 +123,26 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
                 peer,
                 peerlen
             ) != 0) {
-            net_quic_trace(aTHX_ "xs peer sockaddr invalid");
             net_quic_endpoint_free(aTHX_ ep);
             croak("peer must be a packed IPv4 or IPv6 socket address");
         }
-        net_quic_trace(aTHX_ "xs after peer sockaddr");
 
         ep->alpn = net_quic_strdup_len(aTHX_ alpn, (size_t)alpnlen);
-        net_quic_trace(aTHX_ "xs after alpn copy");
         ep->alpnlen = (size_t)alpnlen;
         ep->server_name = net_quic_strdup_len(aTHX_ server_name, (size_t)server_namelen);
-        net_quic_trace(aTHX_ "xs after server name copy");
         if (ep->alpn == NULL || ep->server_name == NULL) {
             net_quic_endpoint_free(aTHX_ ep);
             croak("unable to allocate Net::QUIC::Endpoint strings");
         }
 
-        net_quic_trace(aTHX_ "xs addresses strings");
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
 
-        net_quic_trace(aTHX_ "xs before tls_prepare");
         if (net_quic_tls_prepare(ep) != 0) {
             net_quic_endpoint_free(aTHX_ ep);
             croak("unable to initialize the selected QUIC TLS backend");
         }
 
-        net_quic_trace(aTHX_ "xs after tls_prepare");
         memset(&callbacks, 0, sizeof(callbacks));
         callbacks.client_initial = ngtcp2_crypto_client_initial_cb;
         callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
@@ -192,13 +159,11 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
 
-        net_quic_trace(aTHX_ "xs before random");
         if (net_quic_random_bytes(dcid.data, NGTCP2_MIN_INITIAL_DCIDLEN) != 0 ||
             net_quic_random_bytes(scid.data, 16) != 0) {
             net_quic_endpoint_free(aTHX_ ep);
             croak("unable to generate QUIC connection IDs");
         }
-        net_quic_trace(aTHX_ "xs after random");
         dcid.datalen = NGTCP2_MIN_INITIAL_DCIDLEN;
         scid.datalen = 16;
 
@@ -220,7 +185,6 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         path.remote.addr = &ep->peer_addr.sa;
         path.remote.addrlen = ep->peer_addrlen;
 
-        net_quic_trace(aTHX_ "xs before conn_new");
         rv = ngtcp2_conn_client_new(
             &ep->conn,
             &dcid,
@@ -233,19 +197,16 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
             NULL,
             ep
         );
-        net_quic_trace(aTHX_ "xs after conn_new");
         if (rv != 0) {
             net_quic_endpoint_free(aTHX_ ep);
             croak("ngtcp2_conn_client_new failed: %s", ngtcp2_strerror(rv));
         }
 
-        net_quic_trace(aTHX_ "xs before tls_finish");
         if (net_quic_tls_finish(aTHX_ ep) != 0) {
             net_quic_endpoint_free(aTHX_ ep);
             croak("unable to configure the selected QUIC TLS backend");
         }
 
-        net_quic_trace(aTHX_ "xs after tls_finish");
         RETVAL = net_quic_endpoint_bless(class, ep);
     OUTPUT:
         RETVAL

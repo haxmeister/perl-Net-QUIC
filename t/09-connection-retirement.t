@@ -98,6 +98,36 @@ ok($accepted->ready, 'server handshake completes');
 is($server->_managed_connection_count, 1, 'server manages one connection');
 ok($server->_route_count >= 1, 'server has CID routes for the connection');
 
+my $stream = $client->connection->open_bidi_stream;
+$stream->send('r' x 256);
+$stream->finish;
+
+my $retired_probe;
+for (1 .. 100) {
+    my $datagram = $client->next_datagram;
+    last if !defined $datagram;
+
+    if (
+        (ord(substr($datagram->data, 0, 1)) & 0x80) == 0
+        && length($datagram->data) >= 37
+    ) {
+        $retired_probe = $datagram;
+    }
+
+    $server->receive_datagram(
+        $datagram->data,
+        $server_local,
+        $client_local,
+    );
+
+    last if defined $retired_probe;
+}
+
+ok(
+    defined($retired_probe),
+    'captured a reset-eligible packet for a server-issued CID',
+);
+
 $client->connection->close(42);
 ok(!$client->connection->closed, 'local close begins a closing period');
 
@@ -133,11 +163,22 @@ is($server->_route_count, 0, 'all CID routes are removed at retirement');
 ok(!defined($server->timeout_after), 'retired server connection no longer needs a timer');
 
 $server->receive_datagram(
-    $close_datagram->data,
+    $retired_probe->data,
     $server_local,
     $client_local,
 );
 
+my $reset = $server->next_datagram;
+ok(defined($reset), 'replayed retired CID receives a stateless reset');
+ok(
+    length($reset->data) < length($retired_probe->data),
+    'retired-CID reset is smaller than the triggering packet',
+);
+is(
+    ord(substr($reset->data, 0, 1)) & 0xc0,
+    0x40,
+    'retired-CID reset has QUIC short-header fixed bits',
+);
 is(
     $server->_managed_connection_count,
     0,

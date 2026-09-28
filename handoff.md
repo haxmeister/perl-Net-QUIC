@@ -98,8 +98,8 @@ The UDP socket is still owned by the event-loop integration.
 
 ## CI baseline
 
-GitHub Actions run 36366552646 passed all 15 jobs after the
-Endpoint/Connection split:
+GitHub Actions run 36372489259 passed all 15 jobs after the Picotls-only
+cleanup and CPAN switch to Alien::ngtcp2 0.03:
 
 - Linux Perl 5.20
 - Linux Perl 5.22
@@ -171,22 +171,27 @@ from 5.20 through 5.44 remains intact, along with macOS and Windows coverage.
 
 The event-loop boundary itself is implemented and tested.
 
-The current feature branch removes the old multi-provider TLS code and keeps
-only the Picotls path supplied by Alien::ngtcp2 0.03. CI for that cleanup is
-the next gate.
+The Picotls-only client baseline is green across all 15 CI jobs.
 
-After the Picotls-only client baseline is green, continue without changing the
-event-loop boundary:
+The next change on this branch adds a private server-side Connection
+constructor used only by tests. It inspects the client's real Initial packet,
+creates ngtcp2 server state with the correct CID roles, configures a Picotls
+server session, and uses test-only certificate files.
 
-1. Add a private server-side Connection constructor used only by tests.
-2. Exchange client and server datagrams entirely in memory and complete a real
-   QUIC/TLS handshake, proving receive_datagram as well as packet generation.
-3. Add stream callbacks/state needed for incoming and outgoing QUIC streams.
-4. Design the public server Endpoint around CID routing and multiple Connection
+The new handshake test exchanges generated datagrams between client and server
+entirely in memory through the existing receive/write/timer methods. CI for
+that handshake proof is the current gate.
+
+After that proof is green:
+
+1. Keep the private server constructor private while the public server Endpoint
+   routing design is built.
+2. Add stream callbacks/state needed for incoming and outgoing QUIC streams.
+3. Design the public server Endpoint around CID routing and multiple Connection
    objects after the low-level server connection path is proven.
-5. Write a small Linux::Event adapter as the first framework integration
+4. Write a small Linux::Event adapter as the first framework integration
    example after the raw contract is stable.
-6. Keep HTTP/3 out of this transport layer for now.
+5. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

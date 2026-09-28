@@ -16,6 +16,7 @@
 #endif
 
 #include <ngtcp2/ngtcp2_crypto_picotls.h>
+#include <openssl/pem.h>
 #include <openssl/rand.h>
 #include <picotls.h>
 #include <picotls/openssl.h>
@@ -49,6 +50,8 @@ struct net_quic_connection {
     ptls_context_t ptls_ctx;
     ngtcp2_crypto_picotls_ctx picotls_ctx;
     ptls_iovec_t picotls_alpn;
+    ptls_openssl_sign_certificate_t picotls_sign_cert;
+    ptls_on_client_hello_t picotls_on_client_hello;
 };
 
 static ngtcp2_tstamp

@@ -4,6 +4,7 @@ use warnings;
 use FindBin ();
 use Socket qw(inet_aton pack_sockaddr_in);
 use Test2::V0;
+use Time::HiRes qw(sleep);
 
 use Net::QUIC::Connection;
 use Net::QUIC::Endpoint;
@@ -46,9 +47,8 @@ $server->_receive_datagram(
     $client_local,
 );
 
-for (1 .. 100) {
-    last if $client->connection->ready && $server->ready;
-
+sub pump_pair {
+    my ($client, $server) = @_;
     my $progress = 0;
 
     while (my $datagram = $server->_next_datagram) {
@@ -81,7 +81,37 @@ for (1 .. 100) {
         $server->_handle_timeout;
     }
 
-    last if !$progress;
+    if (!$progress) {
+        my $wait;
+
+        for my $after ($client_after, $server_after) {
+            next if !defined($after) || $after <= 0;
+            $wait = $after if !defined($wait) || $after < $wait;
+        }
+
+        if (defined $wait) {
+            my $nap = $wait > 0.01 ? 0.01 : $wait + 0.001;
+            sleep($nap);
+            ++$progress;
+
+            $client_after = $client->timeout_after;
+            if (defined($client_after) && $client_after <= 0) {
+                $client->handle_timeout;
+            }
+
+            $server_after = $server->_timeout_after;
+            if (defined($server_after) && $server_after <= 0) {
+                $server->_handle_timeout;
+            }
+        }
+    }
+
+    return $progress;
+}
+
+for (1 .. 300) {
+    last if $client->connection->ready && $server->ready;
+    last if !pump_pair($client, $server);
 }
 
 ok($client->connection->ready, 'client completes the in-memory QUIC/TLS handshake');

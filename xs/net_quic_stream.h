@@ -358,6 +358,14 @@ net_quic_stream_queue_fin(pTHX_ net_quic_stream_state *stream)
         return NGTCP2_ERR_STREAM_SHUT_WR;
     }
 
+    if (stream->tx_tail != NULL &&
+        stream->tx_tail->sent < stream->tx_tail->len &&
+        !stream->tx_tail->fin) {
+        stream->tx_tail->fin = 1;
+        stream->local_finished = 1;
+        return 0;
+    }
+
     Newxz(chunk, 1, net_quic_stream_tx_chunk);
     if (chunk == NULL) {
         return NGTCP2_ERR_NOMEM;

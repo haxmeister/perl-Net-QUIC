@@ -57,7 +57,8 @@ WriteMakefile(
     },
 
     TEST_REQUIRES => {
-        'Test2::V0' => 0,
+        'Test2::V0'    => 0,
+        'Time::HiRes'  => 0,
     },
 
     INC    => $cflags,

@@ -58,7 +58,9 @@ sub pump_pair {
         }
 
         if (defined $wait) {
-            sleep($wait + 0.001);
+            my $nap = $wait > 0.01 ? 0.01 : $wait + 0.001;
+            sleep($nap);
+            ++$progress;
 
             $client_after = $client->timeout_after;
             if (defined($client_after) && $client_after <= 0) {

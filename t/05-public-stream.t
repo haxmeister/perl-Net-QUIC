@@ -59,7 +59,9 @@ sub pump_pair {
         }
 
         if (defined $wait) {
-            sleep($wait + 0.001);
+            my $nap = $wait > 0.01 ? 0.01 : $wait + 0.001;
+            sleep($nap);
+            ++$progress;
 
             $client_after = $client->timeout_after;
             if (defined($client_after) && $client_after <= 0) {
@@ -250,5 +252,26 @@ like(
     qr/cannot send on this unidirectional QUIC stream/,
     'send is rejected on receive-only unidirectional stream',
 );
+
+my $reset_client = $client->connection->open_bidi_stream;
+my $reset_id = $reset_client->id;
+$reset_client->reset(77);
+
+my $reset_server;
+for (1 .. 200) {
+    pump_pair($client, $server);
+
+    while (my $stream = $server->next_stream) {
+        if ($stream->id == $reset_id) {
+            $reset_server = $stream;
+        }
+    }
+
+    last if $reset_server
+        && defined $reset_server->remote_reset_code;
+}
+
+isa_ok($reset_server, ['Net::QUIC::Stream']);
+is($reset_server->remote_reset_code, 77, 'peer receives stream reset error code');
 
 done_testing;

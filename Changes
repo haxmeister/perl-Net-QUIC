@@ -7,6 +7,9 @@ Revision history for Net-QUIC
     - Add Net::QUIC::Datagram for outbound UDP payload and path data.
     - Generate a real QUIC Initial packet in the native test suite.
     - Keep UDP sockets and timers outside Net::QUIC.
+    - Use Perl's allocator for endpoint-owned native memory so threaded
+      Windows Perl does not cross C runtime heaps.
+    - Recognize MinGW's WIN32 define for the Windows monotonic clock path.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

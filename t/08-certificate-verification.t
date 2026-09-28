@@ -136,14 +136,14 @@ ok(!defined($trusted_error), 'trusted localhost certificate is accepted');
 ok($trusted_client->connection->ready, 'verified client handshake completes');
 ok($trusted_server && $trusted_server->ready, 'server completes verified handshake');
 
-my ($untrusted_client, undef, $untrusted_error) = run_handshake(
+my ($untrusted_client, $untrusted_server, $untrusted_error) = run_handshake(
     server_name => 'localhost',
 );
 
 ok(defined($untrusted_error), 'self-signed certificate is rejected without trust anchor');
 ok(!$untrusted_client->connection->ready, 'untrusted client never becomes ready');
 
-my ($wrong_name_client, undef, $wrong_name_error) = run_handshake(
+my ($wrong_name_client, $wrong_name_server, $wrong_name_error) = run_handshake(
     server_name => 'not-localhost.example',
     ca_file     => $cert_file,
 );

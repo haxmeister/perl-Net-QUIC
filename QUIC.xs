@@ -147,6 +147,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         callbacks.client_initial = ngtcp2_crypto_client_initial_cb;
         callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
         callbacks.handshake_completed = net_quic_handshake_completed_cb;
+        callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
@@ -329,6 +330,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         callbacks.recv_client_initial = ngtcp2_crypto_recv_client_initial_cb;
         callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
         callbacks.handshake_completed = net_quic_handshake_completed_cb;
+        callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
@@ -394,6 +396,117 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
     OUTPUT:
         RETVAL
 
+IV
+_open_bidi_stream(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        int64_t stream_id;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->ready) {
+            croak("cannot open a QUIC stream before the handshake is ready");
+        }
+
+        rv = ngtcp2_conn_open_bidi_stream(ep->conn, &stream_id, NULL);
+        if (rv != 0) {
+            croak("ngtcp2_conn_open_bidi_stream failed: %s", ngtcp2_strerror(rv));
+        }
+
+        RETVAL = (IV)stream_id;
+    OUTPUT:
+        RETVAL
+
+void
+_queue_stream_data(self, stream_id_iv, data_sv, fin)
+    SV *self
+    IV stream_id_iv
+    SV *data_sv
+    int fin
+    PREINIT:
+        net_quic_connection *ep;
+        const char *data;
+        STRLEN datalen;
+        size_t alloclen;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->ready) {
+            croak("cannot send QUIC stream data before the handshake is ready");
+        }
+        if (ep->stream_tx_data != NULL) {
+            croak("private stream proof only supports one send buffer per connection");
+        }
+
+        data = SvPVbyte(data_sv, datalen);
+        alloclen = datalen == 0 ? 1 : (size_t)datalen;
+        Newx(ep->stream_tx_data, alloclen, uint8_t);
+        if (datalen != 0) {
+            memcpy(ep->stream_tx_data, data, (size_t)datalen);
+        }
+
+        ep->stream_tx_id = (int64_t)stream_id_iv;
+        ep->stream_tx_len = (size_t)datalen;
+        ep->stream_tx_sent = 0;
+        ep->stream_tx_fin = fin ? 1 : 0;
+        ep->stream_tx_pending = 1;
+
+SV *
+_take_stream_data(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        AV *av;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->stream_rx_pending) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            av = newAV();
+            av_push(av, newSViv((IV)ep->stream_rx_id));
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)ep->stream_rx_data,
+                    (STRLEN)ep->stream_rx_len
+                )
+            );
+            av_push(av, newSViv(ep->stream_rx_fin ? 1 : 0));
+            RETVAL = newRV_noinc((SV *)av);
+
+            if (ep->stream_rx_len != 0) {
+                rv = ngtcp2_conn_extend_max_stream_offset(
+                    ep->conn,
+                    ep->stream_rx_id,
+                    (uint64_t)ep->stream_rx_len
+                );
+                if (rv != 0) {
+                    SvREFCNT_dec(RETVAL);
+                    croak(
+                        "ngtcp2_conn_extend_max_stream_offset failed: %s",
+                        ngtcp2_strerror(rv)
+                    );
+                }
+                ngtcp2_conn_extend_max_offset(
+                    ep->conn,
+                    (uint64_t)ep->stream_rx_len
+                );
+            }
+
+            Safefree(ep->stream_rx_data);
+            ep->stream_rx_data = NULL;
+            ep->stream_rx_len = 0;
+            ep->stream_rx_cap = 0;
+            ep->stream_rx_fin = 0;
+            ep->stream_rx_pending = 0;
+        }
+    OUTPUT:
+        RETVAL
+
 SV *
 _next_datagram(self)
     SV *self
@@ -402,24 +515,69 @@ _next_datagram(self)
         ngtcp2_path_storage ps;
         ngtcp2_pkt_info pi;
         ngtcp2_ssize nwrite;
+        ngtcp2_ssize wdatalen;
         ngtcp2_tstamp now;
+        uint32_t flags;
+        size_t remaining;
     CODE:
         ep = net_quic_connection_from_sv(self);
         ngtcp2_path_storage_zero(&ps);
         memset(&pi, 0, sizeof(pi));
 
         now = net_quic_now();
-        nwrite = ngtcp2_conn_write_pkt(
-            ep->conn,
-            &ps.path,
-            &pi,
-            ep->txbuf,
-            sizeof(ep->txbuf),
-            now
-        );
+        wdatalen = -1;
+
+        if (ep->stream_tx_pending) {
+            remaining = ep->stream_tx_len - ep->stream_tx_sent;
+            flags = ep->stream_tx_fin
+                ? NGTCP2_WRITE_STREAM_FLAG_FIN
+                : NGTCP2_WRITE_STREAM_FLAG_NONE;
+
+            nwrite = ngtcp2_conn_write_stream(
+                ep->conn,
+                &ps.path,
+                &pi,
+                ep->txbuf,
+                sizeof(ep->txbuf),
+                &wdatalen,
+                flags,
+                ep->stream_tx_id,
+                ep->stream_tx_data + ep->stream_tx_sent,
+                remaining,
+                now
+            );
+
+            if (nwrite == NGTCP2_ERR_STREAM_DATA_BLOCKED) {
+                wdatalen = -1;
+                nwrite = ngtcp2_conn_write_pkt(
+                    ep->conn,
+                    &ps.path,
+                    &pi,
+                    ep->txbuf,
+                    sizeof(ep->txbuf),
+                    now
+                );
+            }
+
+            if (wdatalen >= 0) {
+                ep->stream_tx_sent += (size_t)wdatalen;
+                if (ep->stream_tx_sent == ep->stream_tx_len) {
+                    ep->stream_tx_pending = 0;
+                }
+            }
+        } else {
+            nwrite = ngtcp2_conn_write_pkt(
+                ep->conn,
+                &ps.path,
+                &pi,
+                ep->txbuf,
+                sizeof(ep->txbuf),
+                now
+            );
+        }
 
         if (nwrite < 0) {
-            croak("ngtcp2_conn_write_pkt failed: %s", ngtcp2_strerror((int)nwrite));
+            croak("ngtcp2 packet write failed: %s", ngtcp2_strerror((int)nwrite));
         }
 
         if (nwrite == 0) {

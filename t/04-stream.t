@@ -1,0 +1,120 @@
+use strict;
+use warnings;
+
+use FindBin ();
+use Socket qw(inet_aton pack_sockaddr_in);
+use Test2::V0;
+
+use Net::QUIC::Connection;
+use Net::QUIC::Endpoint;
+
+my $client_local = pack_sockaddr_in(40001, inet_aton('127.0.0.1'));
+my $server_local = pack_sockaddr_in(4434, inet_aton('127.0.0.1'));
+my $alpn = 'net-quic-stream-test';
+my $cert_file = "$FindBin::Bin/data/server-cert.pem";
+my $key_file = "$FindBin::Bin/data/server-key.pem";
+
+sub pump_pair {
+    my ($client, $server) = @_;
+    my $progress = 0;
+
+    while (my $datagram = $server->_next_datagram) {
+        ++$progress;
+        $client->receive_datagram(
+            $datagram->data,
+            $client_local,
+            $server_local,
+        );
+    }
+
+    while (my $datagram = $client->next_datagram) {
+        ++$progress;
+        $server->_receive_datagram(
+            $datagram->data,
+            $server_local,
+            $client_local,
+        );
+    }
+
+    my $client_after = $client->timeout_after;
+    if (defined($client_after) && $client_after <= 0) {
+        ++$progress;
+        $client->handle_timeout;
+    }
+
+    my $server_after = $server->_timeout_after;
+    if (defined($server_after) && $server_after <= 0) {
+        ++$progress;
+        $server->_handle_timeout;
+    }
+
+    return $progress;
+}
+
+my $client = Net::QUIC::Endpoint->client(
+    local       => $client_local,
+    peer        => $server_local,
+    alpn        => $alpn,
+    server_name => 'localhost',
+);
+
+my $initial = $client->next_datagram;
+ok(defined($initial), 'client produces Initial for stream proof');
+
+my $server = Net::QUIC::Connection->_server_new(
+    $initial->data,
+    $server_local,
+    $client_local,
+    $alpn,
+    $cert_file,
+    $key_file,
+);
+
+$server->_receive_datagram(
+    $initial->data,
+    $server_local,
+    $client_local,
+);
+
+for (1 .. 100) {
+    last if $client->connection->ready && $server->ready;
+    last if !pump_pair($client, $server);
+}
+
+ok($client->connection->ready, 'client is ready for stream proof');
+ok($server->ready, 'server is ready for stream proof');
+
+my $stream_id = $client->connection->_open_bidi_stream;
+ok($stream_id >= 0, 'client opens a real bidirectional QUIC stream');
+
+my $request = join '', map { "request-$_\n" } 1 .. 1200;
+$client->connection->_queue_stream_data($stream_id, $request, 1);
+
+my $server_event;
+for (1 .. 100) {
+    pump_pair($client, $server);
+    $server_event = $server->_take_stream_data;
+    last if defined($server_event) && $server_event->[2];
+}
+
+ok(defined($server_event), 'server receives stream data');
+is($server_event->[0], $stream_id, 'server receives the opened stream id');
+is($server_event->[1], $request, 'server receives the complete multi-packet payload');
+ok($server_event->[2], 'server receives client FIN');
+
+my $response = "stream-response\n";
+$server->_queue_stream_data($stream_id, $response, 1);
+
+my $client_event;
+for (1 .. 100) {
+    pump_pair($client, $server);
+    $client_event = $client->connection->_take_stream_data;
+    last if defined($client_event) && $client_event->[2];
+}
+
+ok(defined($client_event), 'client receives stream response');
+is($client_event->[0], $stream_id, 'client response stays on the same bidi stream');
+is($client_event->[1], $response, 'client receives the response bytes');
+ok($client_event->[2], 'client receives server FIN');
+
+done_testing;

@@ -11,12 +11,28 @@ our $VERSION = $Net::QUIC::VERSION;
 sub _new {
     my ($class, $connection, $id, $local_initiated, $bidirectional) = @_;
 
+    $connection->_stream_retain($id);
+
     return bless {
         connection      => $connection,
         id              => $id,
         local_initiated => $local_initiated ? 1 : 0,
         bidirectional   => $bidirectional ? 1 : 0,
+        retained        => 1,
     }, $class;
+}
+
+sub DESTROY {
+    my ($self) = @_;
+
+    return if !$self->{retained};
+
+    $self->{retained} = 0;
+    my $connection = $self->{connection};
+    return if !defined $connection;
+
+    eval { $connection->_stream_release($self->{id}) };
+    return;
 }
 
 sub id {
@@ -123,7 +139,11 @@ messages must add their own framing.
 A stream does not own a socket. Data queued with C<send> becomes UDP datagrams
 when the surrounding L<Net::QUIC::Endpoint> is drained with C<next_datagram>.
 
-Stream objects keep their L<Net::QUIC::Connection> alive.
+Stream objects keep their L<Net::QUIC::Connection> alive. Closed native stream
+state is kept while a Stream object still exists, so status and buffered receive
+data remain available after QUIC closes the stream. Once the stream is closed
+and no Stream object or pending incoming-stream queue entry needs that state,
+Net::QUIC releases it.
 
 =head1 METHODS
 

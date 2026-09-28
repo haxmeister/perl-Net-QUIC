@@ -15,6 +15,8 @@ my $alpn = 'net-quic-test';
 my $cert_file = "$FindBin::Bin/data/server-cert.pem";
 my $key_file = "$FindBin::Bin/data/server-key.pem";
 
+my $server_tls = Net::QUIC::_ServerTLS->_new($cert_file, $key_file);
+
 ok(-f $cert_file, 'test server certificate exists');
 ok(-f $key_file, 'test server private key exists');
 
@@ -34,8 +36,7 @@ my $server = Net::QUIC::Connection->_server_new(
     $server_local,
     $client_local,
     $alpn,
-    $cert_file,
-    $key_file,
+    $server_tls,
 );
 
 isa_ok($server, ['Net::QUIC::Connection'], 'private server connection is created');

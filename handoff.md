@@ -101,8 +101,8 @@ The UDP socket is still owned by the event-loop integration.
 
 ## CI baseline
 
-GitHub Actions run 36406776408 passed all 15 jobs on stream-proof
-source commit af12f289ebbfcb6bda22d81cb9b36ed16bd76c3d:
+GitHub Actions run 36465468171 passed all 15 jobs on stream-proof
+source commit b3e82f8ed23317de0e87385d327eab970d9b1c81:
 
 - Linux Perl 5.20
 - Linux Perl 5.22
@@ -157,11 +157,49 @@ returns undef. Net::QUIC now marks a transmit batch active while packets are
 being returned and calls ngtcp2_conn_update_pkt_tx_time only when the batch is
 drained.
 
-The proof still has intentionally temporary single-stream storage: one send
-buffer and one receive accumulator per Connection. Sent stream bytes are kept
-unchanged for the lifetime of the Connection. The public stream implementation
-must replace this with independent per-stream state and immutable send buffers
-that are released only after acknowledgement or stream close.
+The original proof used one send buffer and one receive accumulator per
+Connection. That temporary storage has now been replaced by independent native
+state for each stream.
+
+The public stream slice now provides:
+
+    $connection->open_bidi_stream
+    $connection->open_uni_stream
+    $connection->next_stream
+
+and Net::QUIC::Stream provides:
+
+    id
+    local_initiated
+    bidirectional
+    can_send
+    can_receive
+    send
+    finish
+    next_data
+    remote_finished
+    reset
+    remote_reset_code
+    closed
+
+Transmit buffers are copied into Net::QUIC-owned memory and kept immutable
+until ngtcp2 reports acknowledgement or stream close. Receive flow-control
+credit is returned when next_data consumes a queued chunk. Pending streams are
+selected round-robin when producing packets.
+
+The public stream test covers request/response, concurrent bidirectional
+streams, unidirectional stream direction rules, FIN, and reset. The in-memory
+tests also honor positive QUIC pacing timeouts, matching the real Endpoint timer
+contract instead of relying on CPU timing.
+
+Two stream memory improvements remain before calling this area finished:
+
+- Closed stream state is currently retained until the Connection is destroyed.
+  This is safe but should eventually be reclaimed when no Perl Stream object or
+  incoming-stream queue entry still needs it.
+- One large send call is one immutable transmit allocation, so partially
+  acknowledged data cannot release part of that allocation. Fixed-size transmit
+  chunks can improve memory release later without changing the public API.
 
 ## Windows portability findings
 
@@ -224,7 +262,7 @@ from 5.20 through 5.44 remains intact, along with macOS and Windows coverage.
 
 ## Next useful work
 
-The event-loop boundary, Picotls handshake, and bidirectional stream transport
+The event-loop boundary, Picotls handshake, and first public multi-stream API
 are implemented and tested across the full 15-job CI matrix.
 
 The private _server_new constructor is only a development proof. Do not turn it
@@ -232,12 +270,13 @@ into the public server API directly.
 
 Next:
 
-1. Replace the single-stream proof storage with independent per-stream native
-   state and immutable acknowledged send buffers.
-2. Build the public Net::QUIC::Stream object on that state, including local
-   stream opening, remote stream discovery, send, receive, FIN, and reset.
-3. Design the public server Endpoint around CID routing and multiple Connection
-   objects, keeping the private proof constructor private.
+1. Design the public server Endpoint around CID routing and multiple Connection
+   objects behind one UDP socket, keeping the private proof constructor private.
+2. Add production client certificate verification before treating the client
+   TLS path as production-ready.
+3. Reclaim closed per-stream state when no public object or incoming queue entry
+   needs it, and consider fixed-size transmit chunks for earlier ACK memory
+   release.
 4. Write a small Linux::Event adapter as the first framework integration
    example after the raw contract is stable.
 5. Keep HTTP/3 out of this transport layer for now.

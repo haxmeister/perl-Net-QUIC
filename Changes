@@ -17,6 +17,19 @@ Revision history for Net-QUIC
     - Use Perl's allocator for endpoint-owned native memory so threaded
       Windows Perl does not cross C runtime heaps.
     - Recognize MinGW's WIN32 define for the Windows monotonic clock path.
+    - Add Net::QUIC::Stream with local bidirectional and unidirectional stream
+      opening, incoming stream discovery, send, receive, FIN, and reset.
+    - Replace the one-stream proof storage with independent per-stream receive
+      and transmit queues.
+    - Keep transmitted stream bytes immutable until ngtcp2 acknowledges them
+      or closes the stream.
+    - Return QUIC receive flow-control credit when application data is
+      consumed.
+    - Schedule pending streams round-robin when producing UDP datagrams.
+    - Make the in-memory handshake and stream tests honor positive QUIC pacing
+      timers instead of depending on CPU timing.
+    - Test concurrent streams, unidirectional streams, FIN, and reset across
+      the full portability matrix.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

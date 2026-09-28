@@ -113,7 +113,12 @@ Net::QUIC::Stream - one QUIC byte stream
 
 =head1 DESCRIPTION
 
-Net::QUIC::Stream represents one QUIC stream.
+Net::QUIC::Stream represents one QUIC byte stream.
+
+QUIC stream data is an ordered sequence of bytes, not a sequence of messages.
+A C<send> call does not define a message boundary, and received bytes may be
+returned by C<next_data> in different-sized chunks. Applications that need
+messages must add their own framing.
 
 A stream does not own a socket. Data queued with C<send> becomes UDP datagrams
 when the surrounding L<Net::QUIC::Endpoint> is drained with C<next_datagram>.

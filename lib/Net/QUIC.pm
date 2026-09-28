@@ -84,13 +84,20 @@ See L<Net::QUIC::Endpoint> for the complete cycle.
 
 =head1 STATUS
 
-The native client endpoint and event-loop boundary are under active
-development. Stream handling, server endpoints, and the final certificate
-verification API are not stable yet.
+The native client endpoint, event-loop boundary, and first public stream API
+are implemented. Bidirectional and unidirectional streams can send and receive
+ordered bytes, finish cleanly, and reset.
+
+The public server Endpoint and the final production certificate verification
+API are still under development.
 
 =head1 SEE ALSO
 
 L<Net::QUIC::Endpoint>
+
+L<Net::QUIC::Connection>
+
+L<Net::QUIC::Stream>
 
 L<Alien::ngtcp2>
 

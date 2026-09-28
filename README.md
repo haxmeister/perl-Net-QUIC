@@ -17,6 +17,8 @@ The object split is:
 Net::QUIC::Endpoint
     |
     +-- Net::QUIC::Connection
+            |
+            +-- Net::QUIC::Stream
 ```
 
 The endpoint is the event-loop and UDP boundary. A connection represents one
@@ -87,9 +89,44 @@ my $connection = $endpoint->connection;
 The local and peer values are packed IPv4 or IPv6 socket addresses. The
 framework normally obtains them from the UDP socket it already owns.
 
-The endpoint can already build a real QUIC Initial packet and maintain ngtcp2's
-expiry timer. The connection reports handshake readiness. Stream handling,
-server endpoints, and the final certificate verification API come next.
+The endpoint builds real QUIC packets and maintains ngtcp2's expiry timer. The
+connection reports handshake readiness and can open bidirectional and
+unidirectional QUIC streams.
+
+## Streams
+
+A connection opens a local stream:
+
+```perl
+my $stream = $connection->open_bidi_stream;
+
+$stream->send("hello");
+$stream->finish;
+```
+
+C<finish> closes only the local send side cleanly. The peer can still send data
+back on a bidirectional stream.
+
+Streams opened by the peer are pulled from the connection:
+
+```perl
+while (my $stream = $connection->next_stream) {
+    while (defined(my $bytes = $stream->next_data)) {
+        handle_bytes($bytes);
+    }
+}
+```
+
+QUIC streams carry ordered bytes, not messages. One C<send> call is not
+guaranteed to become one C<next_data> result. Applications that need messages
+must add their own framing.
+
+After C<send>, C<finish>, or C<reset>, the surrounding integration uses the
+same endpoint cycle as before: drain C<next_datagram> and rearm the endpoint
+timer.
+
+The public server Endpoint and the final production certificate verification
+API are still under development.
 
 ## Native dependency
 

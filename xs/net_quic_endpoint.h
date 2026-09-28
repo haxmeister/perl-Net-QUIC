@@ -43,11 +43,12 @@
 #define NET_QUIC_TX_BUFSIZE 65536
 
 static void
-net_quic_trace(const char *message)
+net_quic_trace(pTHX_ const char *message)
 {
 #if defined(_WIN32) || defined(WIN32)
-    fprintf(stderr, "NETQUIC-WIN %s\n", message);
-    fflush(stderr);
+    PerlIO *err = PerlIO_stderr();
+    PerlIO_printf(err, "NETQUIC-WIN %s\n", message);
+    PerlIO_flush(err);
 #else
     (void)message;
 #endif

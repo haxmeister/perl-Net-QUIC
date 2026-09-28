@@ -342,22 +342,45 @@ Server work still needed before calling this production-ready:
   certificate and private key separately for every new Connection
 - stateless-reset policy for unknown connection IDs
 
+Client certificate verification is now implemented on
+feature/client-certificate-verification.
+
+Code-bearing checkpoint:
+
+- head: 6476fb503c9b850f1b8a91d1a7bf61081486698e
+- GitHub Actions run: 36483994305
+- full 15-job matrix: PASS
+- 9 test files / 106 tests
+- Linux Perl 5.20 through 5.44: PASS
+- macOS: PASS
+- Windows: PASS
+
+Client TLS behavior now is:
+
+- server_name is required
+- certificate verification is enabled by default
+- Picotls' OpenSSL verifier validates the certificate chain
+- DNS names and IP addresses are checked against server_name
+- OpenSSL default trust locations are used
+- ca_file optionally adds a PEM trust anchor for private/test CAs
+- there is no insecure skip-verification switch
+- untrusted certificates fail the handshake
+- a trusted certificate for the wrong host name fails the handshake
+
+The existing self-signed localhost fixture is now explicitly trusted by tests
+through ca_file. This proves the real verification path rather than bypassing
+verification.
+
 Next:
 
-1. Add production client certificate verification before treating the client
-   TLS path as production-ready.
-2. Add Connection retirement and route cleanup.
-3. Add shared server TLS credential/context state.
-4. Decide and implement stateless-reset policy for unknown connection IDs.
-5. Reclaim closed per-stream state when no public object or incoming queue
+1. Add Connection retirement and route cleanup.
+2. Add shared server TLS credential/context state.
+3. Decide and implement stateless-reset policy for unknown connection IDs.
+4. Reclaim closed per-stream state when no public object or incoming queue
    entry needs it.
-6. Consider fixed-size transmit chunks for earlier ACK memory release.
-7. Write a small Linux::Event adapter after the raw contract is stable.
-8. Keep HTTP/3 out of this transport layer for now.
-
-Certificate verification is still future work. The current client proof does
-not configure production server-certificate verification, so the self-signed
-test certificate is only evidence that the QUIC/TLS handshake machinery works.
+5. Consider fixed-size transmit chunks for earlier ACK memory release.
+6. Write a small Linux::Event adapter after the raw contract is stable.
+7. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

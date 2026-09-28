@@ -89,6 +89,24 @@ my $connection = $endpoint->connection;
 The local and peer values are packed IPv4 or IPv6 socket addresses. The
 framework normally obtains them from the UDP socket it already owns.
 
+Client certificate verification is enabled by default. Net::QUIC uses Picotls'
+OpenSSL verifier to validate the certificate chain and to verify the DNS name
+or IP address in `server_name`. OpenSSL's default trust locations are used.
+
+For a private or test CA, add a PEM file with `ca_file`:
+
+```perl
+my $endpoint = Net::QUIC::Endpoint->client(
+    local       => $packed_local_address,
+    peer        => $packed_peer_address,
+    alpn        => 'my-protocol',
+    server_name => 'internal.example',
+    ca_file     => '/path/to/private-ca.pem',
+);
+```
+
+There is no insecure skip-verification option.
+
 The endpoint builds real QUIC packets and maintains ngtcp2's expiry timer. The
 connection reports handshake readiness and can open bidirectional and
 unidirectional QUIC streams.
@@ -125,9 +143,9 @@ After `send`, `finish`, or `reset`, the surrounding integration uses the
 same endpoint cycle as before: drain `next_datagram` and rearm the endpoint
 timer.
 
-The first multi-connection server Endpoint is implemented, but the server
-front door is still under development. Production client certificate
-verification is also not implemented yet.
+The first multi-connection server Endpoint and stateless server front door are
+implemented. Client certificate and hostname verification are enabled by
+default.
 
 ## Server endpoint
 

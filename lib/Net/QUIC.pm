@@ -90,10 +90,10 @@ unidirectional streams can send and receive ordered bytes, finish cleanly, and
 reset.
 
 The server front door now handles Version Negotiation and optional stateless
-Retry/address validation before Connection allocation. Shared server TLS
-credential state, stateless reset policy for unknown connection IDs, and
-automatic connection retirement are not implemented yet. Production client
-certificate verification is also still under development.
+Retry/address validation before Connection allocation. QUIC clients verify
+server certificate chains and host names by default using Picotls and OpenSSL.
+Shared server TLS credential state, stateless reset policy for unknown
+connection IDs, and automatic connection retirement are not implemented yet.
 
 =head1 SEE ALSO
 

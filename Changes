@@ -47,6 +47,14 @@ Revision history for Net-QUIC
     - Reject Retry-token replay from a different peer address without creating
       Connection state.
     - Test a complete Retry handshake and stream exchange.
+    - Verify client server certificates by default through Picotls and OpenSSL.
+    - Verify DNS names and IP addresses against the required server_name.
+    - Use OpenSSL default trust locations and allow ca_file to add a private
+      PEM trust anchor.
+    - Reject untrusted certificates and trusted certificates with the wrong
+      host name.
+    - Keep certificate verification mandatory; no skip-verification switch is
+      exposed.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

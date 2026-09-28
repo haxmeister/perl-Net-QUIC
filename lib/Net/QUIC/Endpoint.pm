@@ -299,10 +299,34 @@ They must be IPv4 or IPv6 addresses.
 
 =head2 client
 
+    my $endpoint = Net::QUIC::Endpoint->client(
+        local       => $packed_local_address,
+        peer        => $packed_peer_address,
+        alpn        => 'my-protocol',
+        server_name => 'example.com',
+    );
+
 Creates a client endpoint and its first L<Net::QUIC::Connection>.
 
-C<local>, C<peer>, and C<alpn> are required. C<server_name> is used for TLS
-SNI when supplied.
+C<local>, C<peer>, C<alpn>, and C<server_name> are required.
+
+Server certificates are verified by default. Net::QUIC uses Picotls' OpenSSL
+certificate verifier, including certificate-chain validation and DNS-name or
+IP-address verification against C<server_name>. The verifier uses OpenSSL's
+default trust locations.
+
+For a private or test certificate authority, C<ca_file> adds certificates from
+a PEM file to the default trust store:
+
+    my $endpoint = Net::QUIC::Endpoint->client(
+        local       => $packed_local_address,
+        peer        => $packed_peer_address,
+        alpn        => 'my-protocol',
+        server_name => 'internal.example',
+        ca_file     => '/path/to/private-ca.pem',
+    );
+
+Net::QUIC does not provide an insecure skip-verification switch.
 
 =head2 server
 

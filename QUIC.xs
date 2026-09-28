@@ -804,6 +804,8 @@ _next_datagram(self)
         net_quic_stream_tx_chunk *chunk;
         ngtcp2_path_storage ps;
         ngtcp2_pkt_info pi;
+        ngtcp2_addr close_local;
+        ngtcp2_addr close_peer;
         ngtcp2_ssize nwrite;
         ngtcp2_ssize wdatalen;
         ngtcp2_tstamp now;
@@ -812,6 +814,37 @@ _next_datagram(self)
         size_t attempts;
     CODE:
         ep = net_quic_connection_from_sv(self);
+
+        if (ep->retired) {
+            RETVAL = &PL_sv_undef;
+            goto next_datagram_done;
+        }
+
+        if (ep->closebuf_pending) {
+            memset(&close_local, 0, sizeof(close_local));
+            memset(&close_peer, 0, sizeof(close_peer));
+            close_local.addr = &ep->close_local_addr.sa;
+            close_local.addrlen = ep->close_local_addrlen;
+            close_peer.addr = &ep->close_peer_addr.sa;
+            close_peer.addrlen = ep->close_peer_addrlen;
+
+            ep->closebuf_pending = 0;
+            RETVAL = net_quic_datagram_new(
+                ep->closebuf,
+                ep->closebuflen,
+                &close_local,
+                &close_peer
+            );
+            goto next_datagram_done;
+        }
+
+        if (ep->close_wait ||
+            ngtcp2_conn_in_closing_period2(ep->conn) ||
+            ngtcp2_conn_in_draining_period2(ep->conn)) {
+            RETVAL = &PL_sv_undef;
+            goto next_datagram_done;
+        }
+
         ngtcp2_path_storage_zero(&ps);
         memset(&pi, 0, sizeof(pi));
 
@@ -911,6 +944,9 @@ _next_datagram(self)
                 &ps.path.remote
             );
         }
+
+next_datagram_done:
+        ;
     OUTPUT:
         RETVAL
 
@@ -934,9 +970,14 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
         ngtcp2_socklen peer_addrlen;
         ngtcp2_path path;
         ngtcp2_pkt_info pi;
+        ngtcp2_tstamp now;
         int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
+
+        if (ep->retired) {
+            XSRETURN_EMPTY;
+        }
         data = SvPVbyte(data_sv, datalen);
         local = SvPVbyte(local_sv, locallen);
         peer = SvPVbyte(peer_sv, peerlen);
@@ -953,15 +994,25 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
         path.remote.addrlen = peer_addrlen;
         memset(&pi, 0, sizeof(pi));
 
+        now = net_quic_now();
         rv = ngtcp2_conn_read_pkt(
             ep->conn,
             &path,
             &pi,
             (const uint8_t *)data,
             (size_t)datalen,
-            net_quic_now()
+            now
         );
-        if (rv != 0) {
+
+        if (rv == NGTCP2_ERR_DRAINING || rv == NGTCP2_ERR_CLOSING) {
+            net_quic_start_close_wait(ep, now);
+            if (rv == NGTCP2_ERR_CLOSING && ep->closebuflen != 0) {
+                ep->closebuf_pending = 1;
+            }
+        } else if (rv == NGTCP2_ERR_DROP_CONN) {
+            ep->retired = 1;
+            ep->close_wait = 0;
+        } else if (rv != 0) {
             croak("ngtcp2_conn_read_pkt failed: %s", ngtcp2_strerror(rv));
         }
 
@@ -975,16 +1026,23 @@ _timeout_after(self)
         NV seconds;
     CODE:
         ep = net_quic_connection_from_sv(self);
-        expiry = ngtcp2_conn_get_expiry2(ep->conn);
 
-        if (expiry == UINT64_MAX) {
+        if (ep->retired) {
             RETVAL = &PL_sv_undef;
         } else {
             now = net_quic_now();
-            seconds = expiry <= now
-                ? 0.0
-                : (NV)(expiry - now) / (NV)NGTCP2_SECONDS;
-            RETVAL = newSVnv(seconds);
+            expiry = ep->close_wait
+                ? ep->retirement_deadline
+                : ngtcp2_conn_get_expiry2(ep->conn);
+
+            if (expiry == UINT64_MAX) {
+                RETVAL = &PL_sv_undef;
+            } else {
+                seconds = expiry <= now
+                    ? 0.0
+                    : (NV)(expiry - now) / (NV)NGTCP2_SECONDS;
+                RETVAL = newSVnv(seconds);
+            }
         }
     OUTPUT:
         RETVAL
@@ -994,13 +1052,125 @@ _handle_timeout(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        ngtcp2_tstamp now;
         int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
-        rv = ngtcp2_conn_handle_expiry(ep->conn, net_quic_now());
-        if (rv != 0) {
-            croak("ngtcp2_conn_handle_expiry failed: %s", ngtcp2_strerror(rv));
+
+        if (ep->retired) {
+            XSRETURN_EMPTY;
         }
+
+        now = net_quic_now();
+
+        if (ep->close_wait) {
+            if (ep->retirement_deadline <= now) {
+                ep->retired = 1;
+                ep->close_wait = 0;
+            }
+            XSRETURN_EMPTY;
+        }
+
+        rv = ngtcp2_conn_handle_expiry(ep->conn, now);
+        if (rv == NGTCP2_ERR_IDLE_CLOSE || rv == NGTCP2_ERR_DROP_CONN) {
+            ep->retired = 1;
+        } else if (rv == NGTCP2_ERR_DRAINING || rv == NGTCP2_ERR_CLOSING) {
+            net_quic_start_close_wait(ep, now);
+        } else if (rv != 0) {
+            croak("ngtcp2_conn_handle_expiry failed: %s", ngtcp2_strerror(rv));
+        } else if (ngtcp2_conn_in_closing_period2(ep->conn) ||
+                   ngtcp2_conn_in_draining_period2(ep->conn)) {
+            net_quic_start_close_wait(ep, now);
+        }
+
+void
+_close(self, app_error_code_uv = 0)
+    SV *self
+    UV app_error_code_uv
+    PREINIT:
+        net_quic_connection *ep;
+        ngtcp2_ccerr ccerr;
+        ngtcp2_path_storage ps;
+        ngtcp2_pkt_info pi;
+        ngtcp2_ssize nwrite;
+        ngtcp2_tstamp now;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if ((uint64_t)app_error_code_uv > NGTCP2_MAX_VARINT) {
+            croak("application error code is too large");
+        }
+
+        if (ep->retired || ep->close_wait) {
+            XSRETURN_EMPTY;
+        }
+
+        now = net_quic_now();
+
+        if (ngtcp2_conn_in_closing_period2(ep->conn) ||
+            ngtcp2_conn_in_draining_period2(ep->conn)) {
+            net_quic_start_close_wait(ep, now);
+            XSRETURN_EMPTY;
+        }
+
+        ngtcp2_ccerr_default(&ccerr);
+        ngtcp2_ccerr_set_application_error(
+            &ccerr,
+            (uint64_t)app_error_code_uv,
+            NULL,
+            0
+        );
+
+        ngtcp2_path_storage_zero(&ps);
+        memset(&pi, 0, sizeof(pi));
+
+        nwrite = ngtcp2_conn_write_connection_close(
+            ep->conn,
+            &ps.path,
+            &pi,
+            ep->closebuf,
+            sizeof(ep->closebuf),
+            &ccerr,
+            now
+        );
+
+        if (nwrite < 0) {
+            croak(
+                "ngtcp2 connection close failed: %s",
+                ngtcp2_strerror((int)nwrite)
+            );
+        }
+
+        if (nwrite > 0) {
+            if (net_quic_copy_ngtcp2_addr(
+                    &ep->close_local_addr,
+                    &ep->close_local_addrlen,
+                    &ps.path.local
+                ) != 0 ||
+                net_quic_copy_ngtcp2_addr(
+                    &ep->close_peer_addr,
+                    &ep->close_peer_addrlen,
+                    &ps.path.remote
+                ) != 0) {
+                croak("ngtcp2 produced a connection close without a network path");
+            }
+
+            ep->closebuflen = (size_t)nwrite;
+            ep->closebuf_pending = 1;
+        }
+
+        net_quic_start_close_wait(ep, now);
+
+int
+_retired(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = ep->retired ? 1 : 0;
+    OUTPUT:
+        RETVAL
 
 int
 ready(self)

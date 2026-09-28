@@ -84,6 +84,10 @@ WriteMakefile(
                 file    => 'lib/Net/QUIC/Endpoint.pm',
                 version => MM->parse_version('lib/Net/QUIC/Endpoint.pm'),
             },
+            'Net::QUIC::Stream' => {
+                file    => 'lib/Net/QUIC/Stream.pm',
+                version => MM->parse_version('lib/Net/QUIC/Stream.pm'),
+            },
         },
         resources => {
             homepage => 'https://github.com/haxmeister/perl-Net-QUIC',

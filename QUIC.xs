@@ -148,6 +148,10 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
         callbacks.handshake_completed = net_quic_handshake_completed_cb;
         callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
+        callbacks.acked_stream_data_offset = net_quic_acked_stream_data_offset_cb;
+        callbacks.stream_open = net_quic_stream_open_cb;
+        callbacks.stream_close = net_quic_stream_close_cb;
+        callbacks.stream_reset = net_quic_stream_reset_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
@@ -331,6 +335,10 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
         callbacks.handshake_completed = net_quic_handshake_completed_cb;
         callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
+        callbacks.acked_stream_data_offset = net_quic_acked_stream_data_offset_cb;
+        callbacks.stream_open = net_quic_stream_open_cb;
+        callbacks.stream_close = net_quic_stream_close_cb;
+        callbacks.stream_reset = net_quic_stream_reset_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
@@ -397,6 +405,37 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         RETVAL
 
 IV
+_open_stream(self, bidirectional)
+    SV *self
+    int bidirectional
+    PREINIT:
+        net_quic_connection *ep;
+        int64_t stream_id;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->ready) {
+            croak("cannot open a QUIC stream before the handshake is ready");
+        }
+
+        rv = net_quic_stream_open_local(
+            aTHX_ ep,
+            bidirectional ? 1 : 0,
+            &stream_id
+        );
+        if (rv != 0) {
+            croak(
+                "unable to open QUIC stream: %s",
+                ngtcp2_strerror(rv)
+            );
+        }
+
+        RETVAL = (IV)stream_id;
+    OUTPUT:
+        RETVAL
+
+IV
 _open_bidi_stream(self)
     SV *self
     PREINIT:
@@ -410,14 +449,229 @@ _open_bidi_stream(self)
             croak("cannot open a QUIC stream before the handshake is ready");
         }
 
-        rv = ngtcp2_conn_open_bidi_stream(ep->conn, &stream_id, NULL);
+        rv = net_quic_stream_open_local(aTHX_ ep, 1, &stream_id);
         if (rv != 0) {
-            croak("ngtcp2_conn_open_bidi_stream failed: %s", ngtcp2_strerror(rv));
+            croak(
+                "unable to open QUIC stream: %s",
+                ngtcp2_strerror(rv)
+            );
         }
 
         RETVAL = (IV)stream_id;
     OUTPUT:
         RETVAL
+
+SV *
+_next_stream_id(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_next_incoming(ep);
+
+        if (stream == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSViv((IV)stream->id);
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+_stream_info(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        av = newAV();
+        av_push(av, newSViv(stream->local_initiated ? 1 : 0));
+        av_push(av, newSViv(stream->bidirectional ? 1 : 0));
+        RETVAL = newRV_noinc((SV *)av);
+    OUTPUT:
+        RETVAL
+
+void
+_stream_send(self, stream_id_iv, data_sv)
+    SV *self
+    IV stream_id_iv
+    SV *data_sv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        const char *data;
+        STRLEN datalen;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        data = SvPVbyte(data_sv, datalen);
+        rv = net_quic_stream_queue_data(
+            aTHX_ stream,
+            (const uint8_t *)data,
+            (size_t)datalen
+        );
+        if (rv != 0) {
+            croak("unable to queue QUIC stream data: %s", ngtcp2_strerror(rv));
+        }
+
+void
+_stream_finish(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        rv = net_quic_stream_queue_fin(aTHX_ stream);
+        if (rv != 0) {
+            croak("unable to finish QUIC stream: %s", ngtcp2_strerror(rv));
+        }
+
+SV *
+_stream_take_data(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        net_quic_stream_rx_chunk *chunk;
+        AV *av;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        rv = net_quic_stream_consume_rx(ep, stream, &chunk);
+        if (rv != 0) {
+            croak(
+                "unable to consume QUIC stream data: %s",
+                ngtcp2_strerror(rv)
+            );
+        }
+
+        if (chunk == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            av = newAV();
+            av_push(
+                av,
+                newSVpvn((const char *)chunk->data, (STRLEN)chunk->len)
+            );
+            av_push(av, newSViv(chunk->fin ? 1 : 0));
+            RETVAL = newRV_noinc((SV *)av);
+            net_quic_stream_rx_chunk_free(aTHX_ chunk);
+        }
+    OUTPUT:
+        RETVAL
+
+int
+_stream_remote_finished(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+        RETVAL = stream->remote_finished ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+int
+_stream_closed(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+        RETVAL = stream->closed ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+SV *
+_stream_remote_reset_code(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (!stream->remote_reset) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVuv((UV)stream->remote_reset_code);
+        }
+    OUTPUT:
+        RETVAL
+
+void
+_stream_reset(self, stream_id_iv, app_error_code_uv)
+    SV *self
+    IV stream_id_iv
+    UV app_error_code_uv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        rv = ngtcp2_conn_shutdown_stream(
+            ep->conn,
+            0,
+            stream->id,
+            (uint64_t)app_error_code_uv
+        );
+        if (rv != 0) {
+            croak("unable to reset QUIC stream: %s", ngtcp2_strerror(rv));
+        }
+
+        stream->write_shutdown = 1;
 
 void
 _queue_stream_data(self, stream_id_iv, data_sv, fin)
@@ -427,82 +681,70 @@ _queue_stream_data(self, stream_id_iv, data_sv, fin)
     int fin
     PREINIT:
         net_quic_connection *ep;
+        net_quic_stream_state *stream;
         const char *data;
         STRLEN datalen;
-        size_t alloclen;
+        int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
-
-        if (!ep->ready) {
-            croak("cannot send QUIC stream data before the handshake is ready");
-        }
-        if (ep->stream_tx_data != NULL) {
-            croak("private stream proof only supports one send buffer per connection");
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
         }
 
         data = SvPVbyte(data_sv, datalen);
-        alloclen = datalen == 0 ? 1 : (size_t)datalen;
-        Newx(ep->stream_tx_data, alloclen, uint8_t);
-        if (datalen != 0) {
-            memcpy(ep->stream_tx_data, data, (size_t)datalen);
+        rv = net_quic_stream_queue_data(
+            aTHX_ stream,
+            (const uint8_t *)data,
+            (size_t)datalen
+        );
+        if (rv != 0) {
+            croak("unable to queue QUIC stream data: %s", ngtcp2_strerror(rv));
         }
 
-        ep->stream_tx_id = (int64_t)stream_id_iv;
-        ep->stream_tx_len = (size_t)datalen;
-        ep->stream_tx_sent = 0;
-        ep->stream_tx_fin = fin ? 1 : 0;
-        ep->stream_tx_pending = 1;
+        if (fin) {
+            rv = net_quic_stream_queue_fin(aTHX_ stream);
+            if (rv != 0) {
+                croak("unable to finish QUIC stream: %s", ngtcp2_strerror(rv));
+            }
+        }
 
 SV *
 _take_stream_data(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        net_quic_stream_rx_chunk *chunk;
         AV *av;
         int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
+        stream = ep->streams;
+        while (stream != NULL && stream->rx_head == NULL) {
+            stream = stream->next;
+        }
 
-        if (!ep->stream_rx_pending) {
+        if (stream == NULL) {
             RETVAL = &PL_sv_undef;
         } else {
-            av = newAV();
-            av_push(av, newSViv((IV)ep->stream_rx_id));
-            av_push(
-                av,
-                newSVpvn(
-                    (const char *)ep->stream_rx_data,
-                    (STRLEN)ep->stream_rx_len
-                )
-            );
-            av_push(av, newSViv(ep->stream_rx_fin ? 1 : 0));
-            RETVAL = newRV_noinc((SV *)av);
-
-            if (ep->stream_rx_len != 0) {
-                rv = ngtcp2_conn_extend_max_stream_offset(
-                    ep->conn,
-                    ep->stream_rx_id,
-                    (uint64_t)ep->stream_rx_len
-                );
-                if (rv != 0) {
-                    SvREFCNT_dec(RETVAL);
-                    croak(
-                        "ngtcp2_conn_extend_max_stream_offset failed: %s",
-                        ngtcp2_strerror(rv)
-                    );
-                }
-                ngtcp2_conn_extend_max_offset(
-                    ep->conn,
-                    (uint64_t)ep->stream_rx_len
+            rv = net_quic_stream_consume_rx(ep, stream, &chunk);
+            if (rv != 0) {
+                croak(
+                    "unable to consume QUIC stream data: %s",
+                    ngtcp2_strerror(rv)
                 );
             }
 
-            Safefree(ep->stream_rx_data);
-            ep->stream_rx_data = NULL;
-            ep->stream_rx_len = 0;
-            ep->stream_rx_cap = 0;
-            ep->stream_rx_fin = 0;
-            ep->stream_rx_pending = 0;
+            av = newAV();
+            av_push(av, newSViv((IV)stream->id));
+            av_push(
+                av,
+                newSVpvn((const char *)chunk->data, (STRLEN)chunk->len)
+            );
+            av_push(av, newSViv(chunk->fin ? 1 : 0));
+            RETVAL = newRV_noinc((SV *)av);
+            net_quic_stream_rx_chunk_free(aTHX_ chunk);
         }
     OUTPUT:
         RETVAL
@@ -512,6 +754,8 @@ _next_datagram(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        net_quic_stream_tx_chunk *chunk;
         ngtcp2_path_storage ps;
         ngtcp2_pkt_info pi;
         ngtcp2_ssize nwrite;
@@ -519,17 +763,30 @@ _next_datagram(self)
         ngtcp2_tstamp now;
         uint32_t flags;
         size_t remaining;
+        size_t attempts;
     CODE:
         ep = net_quic_connection_from_sv(self);
         ngtcp2_path_storage_zero(&ps);
         memset(&pi, 0, sizeof(pi));
 
         now = net_quic_now();
+        nwrite = 0;
         wdatalen = -1;
+        attempts = net_quic_stream_count(ep);
 
-        if (ep->stream_tx_pending) {
-            remaining = ep->stream_tx_len - ep->stream_tx_sent;
-            flags = ep->stream_tx_fin
+        while (attempts-- != 0) {
+            stream = net_quic_stream_next_tx(ep);
+            if (stream == NULL) {
+                break;
+            }
+
+            chunk = net_quic_stream_pending_chunk(stream);
+            if (chunk == NULL) {
+                continue;
+            }
+
+            remaining = chunk->len - chunk->sent;
+            flags = chunk->fin
                 ? NGTCP2_WRITE_STREAM_FLAG_FIN
                 : NGTCP2_WRITE_STREAM_FLAG_NONE;
 
@@ -541,31 +798,40 @@ _next_datagram(self)
                 sizeof(ep->txbuf),
                 &wdatalen,
                 flags,
-                ep->stream_tx_id,
-                ep->stream_tx_data + ep->stream_tx_sent,
+                stream->id,
+                chunk->data + chunk->sent,
                 remaining,
                 now
             );
 
             if (nwrite == NGTCP2_ERR_STREAM_DATA_BLOCKED) {
+                nwrite = 0;
                 wdatalen = -1;
-                nwrite = ngtcp2_conn_write_pkt(
-                    ep->conn,
-                    &ps.path,
-                    &pi,
-                    ep->txbuf,
-                    sizeof(ep->txbuf),
-                    now
+                continue;
+            }
+
+            if (nwrite < 0) {
+                croak(
+                    "ngtcp2 packet write failed: %s",
+                    ngtcp2_strerror((int)nwrite)
                 );
             }
 
             if (wdatalen >= 0) {
-                ep->stream_tx_sent += (size_t)wdatalen;
-                if (ep->stream_tx_sent == ep->stream_tx_len) {
-                    ep->stream_tx_pending = 0;
+                chunk->sent += (size_t)wdatalen;
+                if (chunk->fin && chunk->sent == chunk->len) {
+                    chunk->fin_sent = 1;
                 }
             }
-        } else {
+
+            if (nwrite != 0) {
+                break;
+            }
+        }
+
+        if (nwrite == 0) {
+            ngtcp2_path_storage_zero(&ps);
+            memset(&pi, 0, sizeof(pi));
             nwrite = ngtcp2_conn_write_pkt(
                 ep->conn,
                 &ps.path,

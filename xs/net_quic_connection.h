@@ -50,6 +50,7 @@ net_quic_crypto_backend(void)
 }
 
 typedef struct net_quic_connection net_quic_connection;
+typedef struct net_quic_stream_state net_quic_stream_state;
 
 struct net_quic_connection {
     ngtcp2_conn *conn;
@@ -69,21 +70,11 @@ struct net_quic_connection {
     uint8_t txbuf[NET_QUIC_TX_BUFSIZE];
     int tx_batch_active;
 
-    int stream_tx_pending;
-    int64_t stream_tx_id;
-    uint8_t *stream_tx_data;
-    size_t stream_tx_len;
-    size_t stream_tx_sent;
-    int stream_tx_fin;
-
-    int stream_rx_seen;
-    int stream_rx_pending;
-    int64_t stream_rx_id;
-    uint64_t stream_rx_next_offset;
-    uint8_t *stream_rx_data;
-    size_t stream_rx_len;
-    size_t stream_rx_cap;
-    int stream_rx_fin;
+    net_quic_stream_state *streams;
+    net_quic_stream_state *streams_tail;
+    net_quic_stream_state *incoming_stream_head;
+    net_quic_stream_state *incoming_stream_tail;
+    net_quic_stream_state *tx_cursor;
 
     ptls_context_t ptls_ctx;
     ngtcp2_crypto_picotls_ctx picotls_ctx;
@@ -177,73 +168,6 @@ net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
     return 0;
 }
 
-static int
-net_quic_recv_stream_data_cb(
-    ngtcp2_conn *conn,
-    uint32_t flags,
-    int64_t stream_id,
-    uint64_t offset,
-    const uint8_t *data,
-    size_t datalen,
-    void *user_data,
-    void *stream_user_data
-)
-{
-    dTHX;
-    net_quic_connection *ep = (net_quic_connection *)user_data;
-    size_t needed;
-    size_t cap;
-
-    (void)conn;
-    (void)stream_user_data;
-
-    if (!ep->stream_rx_seen) {
-        ep->stream_rx_seen = 1;
-        ep->stream_rx_id = stream_id;
-        ep->stream_rx_next_offset = 0;
-    } else if (ep->stream_rx_id != stream_id) {
-        return NGTCP2_ERR_CALLBACK_FAILURE;
-    }
-
-    if (offset != ep->stream_rx_next_offset ||
-        datalen > SIZE_MAX - ep->stream_rx_len) {
-        return NGTCP2_ERR_CALLBACK_FAILURE;
-    }
-
-    ep->stream_rx_pending = 1;
-
-    needed = ep->stream_rx_len + datalen;
-    if (needed > ep->stream_rx_cap) {
-        cap = ep->stream_rx_cap == 0 ? 1024 : ep->stream_rx_cap;
-        while (cap < needed) {
-            if (cap > SIZE_MAX / 2) {
-                cap = needed;
-                break;
-            }
-            cap *= 2;
-        }
-
-        if (ep->stream_rx_data == NULL) {
-            Newx(ep->stream_rx_data, cap, uint8_t);
-        } else {
-            Renew(ep->stream_rx_data, cap, uint8_t);
-        }
-        ep->stream_rx_cap = cap;
-    }
-
-    if (datalen != 0) {
-        memcpy(ep->stream_rx_data + ep->stream_rx_len, data, datalen);
-        ep->stream_rx_len += datalen;
-        ep->stream_rx_next_offset += (uint64_t)datalen;
-    }
-
-    if ((flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0) {
-        ep->stream_rx_fin = 1;
-    }
-
-    return 0;
-}
-
 static ngtcp2_conn *
 net_quic_get_conn(ngtcp2_crypto_conn_ref *conn_ref)
 {
@@ -293,6 +217,7 @@ net_quic_strdup_len(pTHX_ const char *src, size_t len)
     return dest;
 }
 
+#include "net_quic_stream.h"
 #include "net_quic_tls.h"
 
 static void
@@ -308,9 +233,8 @@ net_quic_connection_free(pTHX_ net_quic_connection *ep)
     }
 
     net_quic_tls_cleanup(aTHX_ ep);
+    net_quic_streams_free(aTHX_ ep);
 
-    Safefree(ep->stream_tx_data);
-    Safefree(ep->stream_rx_data);
     Safefree(ep->alpn);
     Safefree(ep->server_name);
     Safefree(ep);

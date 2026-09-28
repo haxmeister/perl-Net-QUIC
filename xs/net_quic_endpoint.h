@@ -3,6 +3,7 @@
 #include "XSUB.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,6 +41,18 @@
 #endif
 
 #define NET_QUIC_TX_BUFSIZE 65536
+
+static void
+net_quic_trace(const char *message)
+{
+#if defined(_WIN32)
+    fprintf(stderr, "NETQUIC-WIN %s\n", message);
+    fflush(stderr);
+#else
+    (void)message;
+#endif
+}
+
 
 static const char *
 net_quic_crypto_backend(void)

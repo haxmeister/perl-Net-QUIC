@@ -125,29 +125,41 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
 
         net_quic_trace(aTHX_ "xs validated");
         ep = (net_quic_endpoint *)calloc(1, sizeof(*ep));
+        net_quic_trace(aTHX_ "xs after calloc");
         if (ep == NULL) {
             croak("unable to allocate Net::QUIC::Endpoint");
         }
 
+        net_quic_trace(aTHX_ "xs before local sockaddr");
         if (net_quic_copy_sockaddr(
                 &ep->local_addr,
                 &ep->local_addrlen,
                 local,
                 locallen
-            ) != 0 ||
-            net_quic_copy_sockaddr(
+            ) != 0) {
+            net_quic_trace(aTHX_ "xs local sockaddr invalid");
+            net_quic_endpoint_free(ep);
+            croak("local must be a packed IPv4 or IPv6 socket address");
+        }
+        net_quic_trace(aTHX_ "xs after local sockaddr");
+
+        if (net_quic_copy_sockaddr(
                 &ep->peer_addr,
                 &ep->peer_addrlen,
                 peer,
                 peerlen
             ) != 0) {
+            net_quic_trace(aTHX_ "xs peer sockaddr invalid");
             net_quic_endpoint_free(ep);
-            croak("local and peer must be packed IPv4 or IPv6 socket addresses");
+            croak("peer must be a packed IPv4 or IPv6 socket address");
         }
+        net_quic_trace(aTHX_ "xs after peer sockaddr");
 
         ep->alpn = net_quic_strdup_len(alpn, (size_t)alpnlen);
+        net_quic_trace(aTHX_ "xs after alpn copy");
         ep->alpnlen = (size_t)alpnlen;
         ep->server_name = net_quic_strdup_len(server_name, (size_t)server_namelen);
+        net_quic_trace(aTHX_ "xs after server name copy");
         if (ep->alpn == NULL || ep->server_name == NULL) {
             net_quic_endpoint_free(ep);
             croak("unable to allocate Net::QUIC::Endpoint strings");

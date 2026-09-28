@@ -59,9 +59,9 @@ net_quic_crypto_backend(void)
 #endif
 }
 
-typedef struct net_quic_endpoint net_quic_endpoint;
+typedef struct net_quic_connection net_quic_connection;
 
-struct net_quic_endpoint {
+struct net_quic_connection {
     ngtcp2_conn *conn;
     ngtcp2_crypto_conn_ref conn_ref;
 
@@ -185,7 +185,7 @@ net_quic_get_new_connection_id_cb(
 static int
 net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
 {
-    net_quic_endpoint *ep = (net_quic_endpoint *)user_data;
+    net_quic_connection *ep = (net_quic_connection *)user_data;
     (void)conn;
 
     ep->ready = 1;
@@ -195,7 +195,7 @@ net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
 static ngtcp2_conn *
 net_quic_get_conn(ngtcp2_crypto_conn_ref *conn_ref)
 {
-    net_quic_endpoint *ep = (net_quic_endpoint *)conn_ref->user_data;
+    net_quic_connection *ep = (net_quic_connection *)conn_ref->user_data;
     return ep->conn;
 }
 
@@ -244,7 +244,7 @@ net_quic_strdup_len(pTHX_ const char *src, size_t len)
 #include "net_quic_tls.h"
 
 static void
-net_quic_endpoint_free(pTHX_ net_quic_endpoint *ep)
+net_quic_connection_free(pTHX_ net_quic_connection *ep)
 {
     if (ep == NULL) {
         return;
@@ -262,25 +262,25 @@ net_quic_endpoint_free(pTHX_ net_quic_endpoint *ep)
     Safefree(ep);
 }
 
-static net_quic_endpoint *
-net_quic_endpoint_from_sv(SV *self)
+static net_quic_connection *
+net_quic_connection_from_sv(SV *self)
 {
-    net_quic_endpoint *ep;
+    net_quic_connection *ep;
 
-    if (!SvROK(self) || !sv_derived_from(self, "Net::QUIC::Endpoint")) {
-        croak("not a Net::QUIC::Endpoint object");
+    if (!SvROK(self) || !sv_derived_from(self, "Net::QUIC::Connection")) {
+        croak("not a Net::QUIC::Connection object");
     }
 
-    ep = INT2PTR(net_quic_endpoint *, SvIV(SvRV(self)));
+    ep = INT2PTR(net_quic_connection *, SvIV(SvRV(self)));
     if (ep == NULL) {
-        croak("Net::QUIC::Endpoint has already been destroyed");
+        croak("Net::QUIC::Connection has already been destroyed");
     }
 
     return ep;
 }
 
 static SV *
-net_quic_endpoint_bless(const char *class, net_quic_endpoint *ep)
+net_quic_connection_bless(const char *class, net_quic_connection *ep)
 {
     SV *inner = newSViv(PTR2IV(ep));
     SV *rv = newRV_noinc(inner);

@@ -89,6 +89,10 @@ WriteMakefile(
                 file    => 'lib/Net/QUIC/Datagram.pm',
                 version => MM->parse_version('lib/Net/QUIC/Datagram.pm'),
             },
+            'Net::QUIC::Connection' => {
+                file    => 'lib/Net/QUIC/Connection.pm',
+                version => MM->parse_version('lib/Net/QUIC/Connection.pm'),
+            },
             'Net::QUIC::Endpoint' => {
                 file    => 'lib/Net/QUIC/Endpoint.pm',
                 version => MM->parse_version('lib/Net/QUIC/Endpoint.pm'),

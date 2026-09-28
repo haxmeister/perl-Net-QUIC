@@ -2,6 +2,8 @@ Revision history for Net-QUIC
 
 0.001_002  2026-09-27
     - Add the first real client QUIC endpoint.
+    - Separate the event-loop Endpoint object from the application-facing
+      Connection object before server support is added.
     - Add the event-loop integration boundary: receive_datagram,
       next_datagram, timeout_after, and handle_timeout.
     - Add Net::QUIC::Datagram for outbound UDP payload and path data.

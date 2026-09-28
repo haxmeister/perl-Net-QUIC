@@ -23,7 +23,7 @@ static ptls_cipher_suite_t *net_quic_picotls_cipher_suites[] = {
 #endif
 
 static int
-net_quic_tls_prepare(net_quic_endpoint *ep)
+net_quic_tls_prepare(net_quic_connection *ep)
 {
 #if defined(NET_QUIC_CRYPTO_OPENSSL)
     ep->ssl_ctx = SSL_CTX_new(TLS_client_method());
@@ -150,7 +150,7 @@ net_quic_tls_prepare(net_quic_endpoint *ep)
 }
 
 static int
-net_quic_tls_finish(pTHX_ net_quic_endpoint *ep)
+net_quic_tls_finish(pTHX_ net_quic_connection *ep)
 {
     unsigned char alpn_wire[256];
 
@@ -271,7 +271,7 @@ net_quic_tls_finish(pTHX_ net_quic_endpoint *ep)
 }
 
 static void
-net_quic_tls_cleanup(pTHX_ net_quic_endpoint *ep)
+net_quic_tls_cleanup(pTHX_ net_quic_connection *ep)
 {
 #if defined(NET_QUIC_CRYPTO_OPENSSL)
     if (ep->ssl != NULL) {

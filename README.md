@@ -11,6 +11,18 @@ Net::QUIC owns QUIC and TLS protocol state.
 It does not own an event loop. It does not require Linux::Event, IO::Async, or
 another particular networking framework.
 
+The object split is:
+
+```text
+Net::QUIC::Endpoint
+    |
+    +-- Net::QUIC::Connection
+```
+
+The endpoint is the event-loop and UDP boundary. A connection represents one
+QUIC connection and is where application-facing connection and stream behavior
+belongs.
+
 An integration layer owns:
 
 - the UDP socket
@@ -18,7 +30,7 @@ An integration layer owns:
 - receiving and sending UDP datagrams
 - one timer
 
-Net::QUIC gives that integration four operations:
+Net::QUIC gives that integration four endpoint operations:
 
 ```perl
 $endpoint->receive_datagram($bytes, $local, $peer);
@@ -59,8 +71,6 @@ with Linux::Event operations. The Net::QUIC calls stay the same.
 
 ## Client endpoint
 
-The first transport-facing API is a client endpoint:
-
 ```perl
 use Net::QUIC::Endpoint;
 
@@ -70,14 +80,16 @@ my $endpoint = Net::QUIC::Endpoint->client(
     alpn        => 'my-protocol',
     server_name => 'example.com',
 );
+
+my $connection = $endpoint->connection;
 ```
 
 The local and peer values are packed IPv4 or IPv6 socket addresses. The
 framework normally obtains them from the UDP socket it already owns.
 
 The endpoint can already build a real QUIC Initial packet and maintain ngtcp2's
-expiry timer. Stream handling, server endpoints, and the final certificate
-verification API come next.
+expiry timer. The connection reports handshake readiness. Stream handling,
+server endpoints, and the final certificate verification API come next.
 
 ## Native dependency
 

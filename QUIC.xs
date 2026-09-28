@@ -1,4 +1,4 @@
-#include "xs/net_quic_endpoint.h"
+#include "xs/net_quic_connection.h"
 
 MODULE = Net::QUIC    PACKAGE = Net::QUIC
 
@@ -62,7 +62,7 @@ _crypto_self_test()
     OUTPUT:
         RETVAL
 
-MODULE = Net::QUIC    PACKAGE = Net::QUIC::Endpoint
+MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
 _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
@@ -72,7 +72,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
     SV *alpn_sv
     SV *server_name_sv
     PREINIT:
-        net_quic_endpoint *ep = NULL;
+        net_quic_connection *ep = NULL;
         const char *local;
         const char *peer;
         const char *alpn;
@@ -102,9 +102,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
             croak("server_name must be at most 255 bytes and cannot contain NUL");
         }
 
-        Newxz(ep, 1, net_quic_endpoint);
+        Newxz(ep, 1, net_quic_connection);
         if (ep == NULL) {
-            croak("unable to allocate Net::QUIC::Endpoint");
+            croak("unable to allocate Net::QUIC::Connection");
         }
 
         if (net_quic_copy_sockaddr(
@@ -113,7 +113,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
                 local,
                 locallen
             ) != 0) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             croak("local must be a packed IPv4 or IPv6 socket address");
         }
 
@@ -123,7 +123,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
                 peer,
                 peerlen
             ) != 0) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             croak("peer must be a packed IPv4 or IPv6 socket address");
         }
 
@@ -131,15 +131,15 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         ep->alpnlen = (size_t)alpnlen;
         ep->server_name = net_quic_strdup_len(aTHX_ server_name, (size_t)server_namelen);
         if (ep->alpn == NULL || ep->server_name == NULL) {
-            net_quic_endpoint_free(aTHX_ ep);
-            croak("unable to allocate Net::QUIC::Endpoint strings");
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to allocate Net::QUIC::Connection strings");
         }
 
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
 
         if (net_quic_tls_prepare(ep) != 0) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             croak("unable to initialize the selected QUIC TLS backend");
         }
 
@@ -161,7 +161,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
 
         if (net_quic_random_bytes(dcid.data, NGTCP2_MIN_INITIAL_DCIDLEN) != 0 ||
             net_quic_random_bytes(scid.data, 16) != 0) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             croak("unable to generate QUIC connection IDs");
         }
         dcid.datalen = NGTCP2_MIN_INITIAL_DCIDLEN;
@@ -198,30 +198,30 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
             ep
         );
         if (rv != 0) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             croak("ngtcp2_conn_client_new failed: %s", ngtcp2_strerror(rv));
         }
 
         if (net_quic_tls_finish(aTHX_ ep) != 0) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             croak("unable to configure the selected QUIC TLS backend");
         }
 
-        RETVAL = net_quic_endpoint_bless(class, ep);
+        RETVAL = net_quic_connection_bless(class, ep);
     OUTPUT:
         RETVAL
 
 SV *
-next_datagram(self)
+_next_datagram(self)
     SV *self
     PREINIT:
-        net_quic_endpoint *ep;
+        net_quic_connection *ep;
         ngtcp2_path_storage ps;
         ngtcp2_pkt_info pi;
         ngtcp2_ssize nwrite;
         ngtcp2_tstamp now;
     CODE:
-        ep = net_quic_endpoint_from_sv(self);
+        ep = net_quic_connection_from_sv(self);
         ngtcp2_path_storage_zero(&ps);
         memset(&pi, 0, sizeof(pi));
 
@@ -258,13 +258,13 @@ next_datagram(self)
         RETVAL
 
 void
-receive_datagram(self, data_sv, local_sv, peer_sv)
+_receive_datagram(self, data_sv, local_sv, peer_sv)
     SV *self
     SV *data_sv
     SV *local_sv
     SV *peer_sv
     PREINIT:
-        net_quic_endpoint *ep;
+        net_quic_connection *ep;
         const char *data;
         const char *local;
         const char *peer;
@@ -279,7 +279,7 @@ receive_datagram(self, data_sv, local_sv, peer_sv)
         ngtcp2_pkt_info pi;
         int rv;
     CODE:
-        ep = net_quic_endpoint_from_sv(self);
+        ep = net_quic_connection_from_sv(self);
         data = SvPVbyte(data_sv, datalen);
         local = SvPVbyte(local_sv, locallen);
         peer = SvPVbyte(peer_sv, peerlen);
@@ -309,15 +309,15 @@ receive_datagram(self, data_sv, local_sv, peer_sv)
         }
 
 SV *
-timeout_after(self)
+_timeout_after(self)
     SV *self
     PREINIT:
-        net_quic_endpoint *ep;
+        net_quic_connection *ep;
         ngtcp2_tstamp expiry;
         ngtcp2_tstamp now;
         NV seconds;
     CODE:
-        ep = net_quic_endpoint_from_sv(self);
+        ep = net_quic_connection_from_sv(self);
         expiry = ngtcp2_conn_get_expiry2(ep->conn);
 
         if (expiry == UINT64_MAX) {
@@ -333,13 +333,13 @@ timeout_after(self)
         RETVAL
 
 void
-handle_timeout(self)
+_handle_timeout(self)
     SV *self
     PREINIT:
-        net_quic_endpoint *ep;
+        net_quic_connection *ep;
         int rv;
     CODE:
-        ep = net_quic_endpoint_from_sv(self);
+        ep = net_quic_connection_from_sv(self);
         rv = ngtcp2_conn_handle_expiry(ep->conn, net_quic_now());
         if (rv != 0) {
             croak("ngtcp2_conn_handle_expiry failed: %s", ngtcp2_strerror(rv));
@@ -349,9 +349,9 @@ int
 ready(self)
     SV *self
     PREINIT:
-        net_quic_endpoint *ep;
+        net_quic_connection *ep;
     CODE:
-        ep = net_quic_endpoint_from_sv(self);
+        ep = net_quic_connection_from_sv(self);
         RETVAL = ep->ready ? 1 : 0;
     OUTPUT:
         RETVAL
@@ -360,7 +360,7 @@ void
 DESTROY(self)
     SV *self
     PREINIT:
-        net_quic_endpoint *ep;
+        net_quic_connection *ep;
         SV *inner;
     CODE:
         if (!SvROK(self)) {
@@ -368,8 +368,8 @@ DESTROY(self)
         }
 
         inner = SvRV(self);
-        ep = INT2PTR(net_quic_endpoint *, SvIV(inner));
+        ep = INT2PTR(net_quic_connection *, SvIV(inner));
         if (ep != NULL) {
-            net_quic_endpoint_free(aTHX_ ep);
+            net_quic_connection_free(aTHX_ ep);
             sv_setiv(inner, 0);
         }

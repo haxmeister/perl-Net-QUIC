@@ -5,6 +5,7 @@ use warnings;
 
 use Carp qw(croak);
 use Net::QUIC ();
+use Net::QUIC::Connection ();
 use Net::QUIC::Datagram ();
 
 our $VERSION = $Net::QUIC::VERSION;
@@ -21,12 +22,41 @@ sub client {
         ? $args{server_name}
         : '';
 
-    return $class->_client_new(
+    my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
         $args{peer},
         $args{alpn},
         $server_name,
     );
+
+    return bless {
+        connection => $connection,
+    }, $class;
+}
+
+sub connection {
+    my ($self) = @_;
+    return $self->{connection};
+}
+
+sub receive_datagram {
+    my ($self, @args) = @_;
+    return $self->{connection}->_receive_datagram(@args);
+}
+
+sub next_datagram {
+    my ($self) = @_;
+    return $self->{connection}->_next_datagram;
+}
+
+sub timeout_after {
+    my ($self) = @_;
+    return $self->{connection}->_timeout_after;
+}
+
+sub handle_timeout {
+    my ($self) = @_;
+    return $self->{connection}->_handle_timeout;
 }
 
 1;
@@ -48,6 +78,8 @@ Net::QUIC::Endpoint - event-loop boundary for QUIC
         server_name => 'example.com',
     );
 
+    my $connection = $endpoint->connection;
+
     while (my $datagram = $endpoint->next_datagram) {
         $udp->send($datagram->data, $datagram->peer);
     }
@@ -59,7 +91,13 @@ Net::QUIC::Endpoint - event-loop boundary for QUIC
 Net::QUIC::Endpoint is the small boundary between QUIC and an event loop.
 
 An event-loop integration owns the UDP socket and its timer. The endpoint owns
-the QUIC protocol state.
+the transport-facing side of QUIC and gives the integration datagrams to send
+and a timeout to schedule.
+
+A QUIC connection is represented separately by L<Net::QUIC::Connection>.
+For a client endpoint there is currently one connection. A future server
+endpoint can use the same event-loop boundary while managing several
+connections behind one UDP socket.
 
 For a client integration, the basic cycle is:
 
@@ -77,27 +115,20 @@ The C<local> and C<peer> addresses are packed socket addresses such as those
 returned by Perl's L<Socket> functions or by the networking framework in use.
 They must be IPv4 or IPv6 addresses.
 
-This is an early development API. It currently establishes the native client
-endpoint and transport boundary. Stream handling and the final TLS verification
-API are still under development.
-
 =head1 METHODS
 
 =head2 client
 
-    my $endpoint = Net::QUIC::Endpoint->client(
-        local       => $local,
-        peer        => $peer,
-        alpn        => 'chat/1',
-        server_name => 'example.com',
-    );
+Creates a client endpoint and its first L<Net::QUIC::Connection>.
 
-Creates client-side QUIC state. C<local>, C<peer>, and C<alpn> are required.
-C<server_name> is used for TLS SNI when supplied.
+C<local>, C<peer>, and C<alpn> are required. C<server_name> is used for TLS
+SNI when supplied.
 
-The UDP socket must already have a real local address before creating the
-endpoint. An integration will normally create or connect its UDP socket first,
-then obtain the socket's local and peer addresses and create the endpoint.
+=head2 connection
+
+    my $connection = $endpoint->connection;
+
+Returns the client connection owned by this endpoint.
 
 =head2 receive_datagram
 
@@ -127,13 +158,5 @@ currently needed.
 
 Tells QUIC that its event-loop timer fired. After this call, drain
 C<next_datagram> again and arrange the new C<timeout_after> value.
-
-=head2 ready
-
-    if ($endpoint->ready) {
-        ...
-    }
-
-Returns true after the QUIC cryptographic handshake has completed.
 
 =cut

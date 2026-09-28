@@ -4,6 +4,7 @@ use warnings;
 use Socket qw(inet_aton pack_sockaddr_in);
 use Test2::V0;
 
+use Net::QUIC::Connection;
 use Net::QUIC::Datagram;
 use Net::QUIC::Endpoint;
 
@@ -18,7 +19,10 @@ my $endpoint = Net::QUIC::Endpoint->client(
 );
 
 isa_ok($endpoint, ['Net::QUIC::Endpoint'], 'client endpoint is created');
-ok(!$endpoint->ready, 'new client is not ready before the handshake');
+
+my $connection = $endpoint->connection;
+isa_ok($connection, ['Net::QUIC::Connection'], 'client endpoint owns a connection');
+ok(!$connection->ready, 'new connection is not ready before the handshake');
 
 my $datagram = $endpoint->next_datagram;
 isa_ok($datagram, ['Net::QUIC::Datagram'], 'client produces an initial datagram');
@@ -36,7 +40,5 @@ like(
     qr/missing required alpn argument/,
     'client constructor explains a missing required argument',
 );
-
-undef $endpoint;
 
 done_testing;

@@ -199,14 +199,20 @@ my $queued_id = $queued_client->id;
 $queued_client->send("queued-before-next-stream\n");
 $queued_client->finish;
 
+my $queued_seen = 0;
 my $queued_closed = 0;
 for (1 .. 500) {
     pump_pair($client, $server);
 
-    $queued_closed = $server->_stream_closed($queued_id);
+    if ($server->_stream_state_count != 0) {
+        $queued_seen = 1;
+        $queued_closed = $server->_stream_closed($queued_id);
+    }
+
     last if $queued_closed;
 }
 
+ok($queued_seen, 'server creates native state for queued incoming stream');
 ok($queued_closed, 'incoming stream can close before next_stream is called');
 is(
     $server->_stream_state_count,

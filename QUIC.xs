@@ -1,5 +1,32 @@
 #include "xs/net_quic_connection.h"
 
+static net_quic_server_tls *
+net_quic_server_tls_from_sv(SV *self)
+{
+    net_quic_server_tls *tls;
+
+    if (!SvROK(self) ||
+        !sv_derived_from(self, "Net::QUIC::_ServerTLS")) {
+        croak("not a Net::QUIC::_ServerTLS object");
+    }
+
+    tls = INT2PTR(net_quic_server_tls *, SvIV(SvRV(self)));
+    if (tls == NULL) {
+        croak("Net::QUIC::_ServerTLS has already been destroyed");
+    }
+
+    return tls;
+}
+
+static SV *
+net_quic_server_tls_bless(const char *class, net_quic_server_tls *tls)
+{
+    SV *inner = newSViv(PTR2IV(tls));
+    SV *rv = newRV_noinc(inner);
+    sv_bless(rv, gv_stashpv(class, GV_ADD));
+    return rv;
+}
+
 MODULE = Net::QUIC    PACKAGE = Net::QUIC
 
 PROTOTYPES: DISABLE
@@ -61,6 +88,65 @@ _crypto_self_test()
         RETVAL = rv == 0 ? 1 : 0;
     OUTPUT:
         RETVAL
+
+MODULE = Net::QUIC    PACKAGE = Net::QUIC::_ServerTLS
+
+SV *
+_new(class, cert_file_sv, key_file_sv)
+    const char *class
+    SV *cert_file_sv
+    SV *key_file_sv
+    PREINIT:
+        net_quic_server_tls *tls = NULL;
+        const char *cert_file;
+        const char *key_file;
+        STRLEN cert_file_len;
+        STRLEN key_file_len;
+        const char *tls_error;
+    CODE:
+        cert_file = SvPVbyte(cert_file_sv, cert_file_len);
+        key_file = SvPVbyte(key_file_sv, key_file_len);
+
+        if (cert_file_len == 0 || key_file_len == 0 ||
+            memchr(cert_file, '\0', (size_t)cert_file_len) != NULL ||
+            memchr(key_file, '\0', (size_t)key_file_len) != NULL) {
+            croak("certificate and key paths must be non-empty and cannot contain NUL");
+        }
+
+        Newxz(tls, 1, net_quic_server_tls);
+        if (tls == NULL) {
+            croak("unable to allocate shared server TLS context");
+        }
+
+        tls_error = net_quic_server_tls_init(tls, cert_file, key_file);
+        if (tls_error != NULL) {
+            net_quic_server_tls_dispose(tls);
+            Safefree(tls);
+            croak("%s", tls_error);
+        }
+
+        RETVAL = net_quic_server_tls_bless(class, tls);
+    OUTPUT:
+        RETVAL
+
+void
+DESTROY(self)
+    SV *self
+    PREINIT:
+        net_quic_server_tls *tls;
+        SV *inner;
+    CODE:
+        if (!SvROK(self)) {
+            XSRETURN_EMPTY;
+        }
+
+        inner = SvRV(self);
+        tls = INT2PTR(net_quic_server_tls *, SvIV(inner));
+        if (tls != NULL) {
+            net_quic_server_tls_dispose(tls);
+            Safefree(tls);
+            sv_setiv(inner, 0);
+        }
 
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
@@ -227,14 +313,13 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_file_sv, odcid_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv
     SV *peer_sv
     SV *alpn_sv
-    SV *cert_file_sv
-    SV *key_file_sv
+    SV *server_tls_sv
     SV *odcid_sv
     PREINIT:
         net_quic_connection *ep = NULL;
@@ -242,14 +327,11 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         const char *local;
         const char *peer;
         const char *alpn;
-        const char *cert_file;
-        const char *key_file;
+        net_quic_server_tls *server_tls;
         STRLEN initiallen;
         STRLEN locallen;
         STRLEN peerlen;
         STRLEN alpnlen;
-        STRLEN cert_file_len;
-        STRLEN key_file_len;
         const char *odcid_data = NULL;
         STRLEN odcid_len = 0;
         ngtcp2_version_cid vcid;
@@ -267,8 +349,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         local = SvPVbyte(local_sv, locallen);
         peer = SvPVbyte(peer_sv, peerlen);
         alpn = SvPVbyte(alpn_sv, alpnlen);
-        cert_file = SvPVbyte(cert_file_sv, cert_file_len);
-        key_file = SvPVbyte(key_file_sv, key_file_len);
+        server_tls = net_quic_server_tls_from_sv(server_tls_sv);
         if (SvOK(odcid_sv)) {
             odcid_data = SvPVbyte(odcid_sv, odcid_len);
             if (odcid_len == 0 || odcid_len > NGTCP2_MAX_CIDLEN) {
@@ -278,10 +359,6 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
 
         if (alpnlen == 0 || alpnlen > 255) {
             croak("alpn must contain 1 to 255 bytes");
-        }
-        if (memchr(cert_file, '\0', (size_t)cert_file_len) != NULL ||
-            memchr(key_file, '\0', (size_t)key_file_len) != NULL) {
-            croak("certificate and key paths cannot contain NUL");
         }
 
         memset(&vcid, 0, sizeof(vcid));
@@ -342,8 +419,9 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
 
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
+        ep->server_tls_owner = SvREFCNT_inc(server_tls_sv);
 
-        tls_error = net_quic_tls_server_prepare(ep, cert_file, key_file);
+        tls_error = net_quic_tls_server_prepare(ep, server_tls);
         if (tls_error != NULL) {
             net_quic_connection_free(aTHX_ ep);
             croak("%s", tls_error);

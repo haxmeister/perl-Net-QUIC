@@ -269,7 +269,7 @@ net_quic_endpoint_free(pTHX_ net_quic_endpoint *ep)
         ep->conn = NULL;
     }
 
-    net_quic_tls_cleanup(ep);
+    net_quic_tls_cleanup(aTHX_ ep);
 
     Safefree(ep->alpn);
     Safefree(ep->server_name);

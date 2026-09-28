@@ -1,9 +1,16 @@
+#include <stdlib.h>
+
+static void
+net_quic_system_free(void *ptr)
+{
+    free(ptr);
+}
+
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
 
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <ngtcp2/ngtcp2.h>

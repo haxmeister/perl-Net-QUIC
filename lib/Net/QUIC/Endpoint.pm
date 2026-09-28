@@ -49,6 +49,9 @@ sub server {
         certificate_file    => $args{certificate_file},
         private_key_file    => $args{private_key_file},
         cid_length          => $class->_server_cid_length,
+        retry_secret        => $class->_server_secret,
+        validate_address    => $args{validate_address} ? 1 : 0,
+        stateless_tx        => [],
         routes              => {},
         connections         => [],
         pending_connections => [],
@@ -81,6 +84,21 @@ sub _server_receive_datagram {
     my $connection = $self->{routes}{$dcid};
 
     if (!$connection) {
+        my $front = $self->_server_front_door(
+            $bytes,
+            $peer,
+            $self->{retry_secret},
+            $self->{validate_address},
+        );
+
+        return if $front->[0] == 0;
+
+        if ($front->[0] == 1) {
+            push @{$self->{stateless_tx}},
+                Net::QUIC::Datagram->_new($front->[1], $local, $peer);
+            return;
+        }
+
         my $initial_dcid = $self->_initial_dcid($bytes);
         return if !defined $initial_dcid;
 
@@ -91,6 +109,7 @@ sub _server_receive_datagram {
             $self->{alpn},
             $self->{certificate_file},
             $self->{private_key_file},
+            $front->[1],
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
@@ -109,6 +128,11 @@ sub _server_receive_datagram {
 
 sub _server_next_datagram {
     my ($self) = @_;
+
+    if (@{$self->{stateless_tx}}) {
+        return shift @{$self->{stateless_tx}};
+    }
+
     my $connections = $self->{connections};
     my $count = @$connections;
 

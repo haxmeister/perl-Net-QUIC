@@ -25,6 +25,7 @@ net_quic_system_free(void *ptr)
 
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
@@ -43,6 +44,8 @@ net_quic_system_free(void *ptr)
 
 #define NET_QUIC_TX_BUFSIZE 65536
 #define NET_QUIC_SERVER_CIDLEN 16
+#define NET_QUIC_SERVER_SECRET_LEN 32
+#define NET_QUIC_RETRY_TOKEN_TIMEOUT (10 * NGTCP2_SECONDS)
 
 static const char *
 net_quic_crypto_backend(void)
@@ -93,6 +96,18 @@ struct net_quic_connection {
     ptls_openssl_sign_certificate_t picotls_sign_cert;
     ptls_on_client_hello_t picotls_on_client_hello;
 };
+
+static ngtcp2_tstamp
+net_quic_system_now(void)
+{
+    time_t now = time(NULL);
+
+    if (now == (time_t)-1) {
+        croak("unable to read system clock");
+    }
+
+    return (ngtcp2_tstamp)now * NGTCP2_SECONDS;
+}
 
 static ngtcp2_tstamp
 net_quic_now(void)

@@ -175,6 +175,16 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
 
+        if (odcid_data != NULL) {
+            if (hd.tokenlen == 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("Retry-validated connection is missing its token");
+            }
+            settings.token = hd.token;
+            settings.tokenlen = hd.tokenlen;
+            settings.token_type = NGTCP2_TOKEN_TYPE_RETRY;
+        }
+
         ngtcp2_transport_params_default(&params);
         params.initial_max_stream_data_bidi_local = 256 * 1024;
         params.initial_max_stream_data_bidi_remote = 256 * 1024;
@@ -217,7 +227,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_file_sv)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_file_sv, odcid_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -225,6 +235,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
     SV *alpn_sv
     SV *cert_file_sv
     SV *key_file_sv
+    SV *odcid_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -239,6 +250,8 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         STRLEN alpnlen;
         STRLEN cert_file_len;
         STRLEN key_file_len;
+        const char *odcid_data = NULL;
+        STRLEN odcid_len = 0;
         ngtcp2_version_cid vcid;
         ngtcp2_pkt_hd hd;
         ngtcp2_callbacks callbacks;
@@ -256,6 +269,12 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         alpn = SvPVbyte(alpn_sv, alpnlen);
         cert_file = SvPVbyte(cert_file_sv, cert_file_len);
         key_file = SvPVbyte(key_file_sv, key_file_len);
+        if (SvOK(odcid_sv)) {
+            odcid_data = SvPVbyte(odcid_sv, odcid_len);
+            if (odcid_len == 0 || odcid_len > NGTCP2_MAX_CIDLEN) {
+                croak("original destination connection ID has invalid length");
+            }
+        }
 
         if (alpnlen == 0 || alpnlen > 255) {
             croak("alpn must contain 1 to 255 bytes");
@@ -370,7 +389,18 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, cert_file_sv, key_fil
         params.initial_max_streams_bidi = 100;
         params.initial_max_streams_uni = 100;
         params.active_connection_id_limit = 4;
-        ngtcp2_cid_init(&params.original_dcid, vcid.dcid, vcid.dcidlen);
+
+        if (odcid_data != NULL) {
+            ngtcp2_cid_init(
+                &params.original_dcid,
+                (const uint8_t *)odcid_data,
+                (size_t)odcid_len
+            );
+            ngtcp2_cid_init(&params.retry_scid, hd.dcid.data, hd.dcid.datalen);
+            params.retry_scid_present = 1;
+        } else {
+            ngtcp2_cid_init(&params.original_dcid, vcid.dcid, vcid.dcidlen);
+        }
         params.original_dcid_present = 1;
 
         memset(&path, 0, sizeof(path));
@@ -1027,6 +1057,20 @@ DESTROY(self)
 
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Endpoint
 
+SV *
+_server_secret(class)
+    const char *class
+    PREINIT:
+        uint8_t secret[NET_QUIC_SERVER_SECRET_LEN];
+    CODE:
+        (void)class;
+        if (net_quic_random_bytes(secret, sizeof(secret)) != 0) {
+            croak("unable to generate server Retry secret");
+        }
+        RETVAL = newSVpvn((const char *)secret, (STRLEN)sizeof(secret));
+    OUTPUT:
+        RETVAL
+
 UV
 _server_cid_length(class)
     const char *class
@@ -1103,6 +1147,271 @@ _initial_dcid(class, data_sv)
                     (const char *)vcid.dcid,
                     (STRLEN)vcid.dcidlen
                 );
+            }
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+_server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
+    const char *class
+    SV *data_sv
+    SV *peer_sv
+    SV *secret_sv
+    int validate_address
+    PREINIT:
+        const char *data;
+        const char *peer;
+        const char *secret;
+        STRLEN datalen;
+        STRLEN peerlen;
+        STRLEN secretlen;
+        ngtcp2_sockaddr_union peer_addr;
+        ngtcp2_socklen peer_addrlen;
+        ngtcp2_version_cid vcid;
+        ngtcp2_pkt_hd hd;
+        ngtcp2_cid retry_scid;
+        ngtcp2_cid odcid;
+        uint8_t token[NGTCP2_CRYPTO_MAX_RETRY_TOKENLEN2];
+        uint8_t response[NGTCP2_MAX_UDP_PAYLOAD_SIZE];
+        uint8_t unused_random;
+        uint32_t supported_versions[2];
+        size_t supported_versionslen;
+        ngtcp2_ssize tokenlen;
+        ngtcp2_ssize nwrite;
+        ngtcp2_tstamp now;
+        AV *av;
+        int rv;
+    CODE:
+        (void)class;
+        data = SvPVbyte(data_sv, datalen);
+        peer = SvPVbyte(peer_sv, peerlen);
+        secret = SvPVbyte(secret_sv, secretlen);
+
+        av = newAV();
+
+        if (secretlen != NET_QUIC_SERVER_SECRET_LEN ||
+            net_quic_copy_sockaddr(
+                &peer_addr,
+                &peer_addrlen,
+                peer,
+                peerlen
+            ) != 0) {
+            av_push(av, newSViv(0));
+            RETVAL = newRV_noinc((SV *)av);
+        } else {
+            memset(&vcid, 0, sizeof(vcid));
+            rv = ngtcp2_pkt_decode_version_cid(
+                &vcid,
+                (const uint8_t *)data,
+                (size_t)datalen,
+                NET_QUIC_SERVER_CIDLEN
+            );
+
+            if (rv == NGTCP2_ERR_VERSION_NEGOTIATION) {
+                supported_versions[0] = NGTCP2_PROTO_VER_V1;
+                supported_versions[1] = NGTCP2_PROTO_VER_V2;
+                supported_versionslen = 2;
+
+                if (net_quic_random_bytes(&unused_random, 1) != 0) {
+                    croak("unable to generate Version Negotiation randomness");
+                }
+
+                nwrite = ngtcp2_pkt_write_version_negotiation(
+                    response,
+                    sizeof(response),
+                    unused_random,
+                    vcid.scid,
+                    vcid.scidlen,
+                    vcid.dcid,
+                    vcid.dcidlen,
+                    supported_versions,
+                    supported_versionslen
+                );
+
+                if (nwrite < 0) {
+                    croak(
+                        "unable to write QUIC Version Negotiation packet: %s",
+                        ngtcp2_strerror((int)nwrite)
+                    );
+                }
+
+                av_push(av, newSViv(1));
+                av_push(
+                    av,
+                    newSVpvn((const char *)response, (STRLEN)nwrite)
+                );
+                RETVAL = newRV_noinc((SV *)av);
+            } else if (rv != 0) {
+                av_push(av, newSViv(0));
+                RETVAL = newRV_noinc((SV *)av);
+            } else {
+                memset(&hd, 0, sizeof(hd));
+                rv = ngtcp2_accept(
+                    &hd,
+                    (const uint8_t *)data,
+                    (size_t)datalen
+                );
+
+                if (rv != 0) {
+                    av_push(av, newSViv(0));
+                    RETVAL = newRV_noinc((SV *)av);
+                } else if (hd.tokenlen == 0 && validate_address) {
+                    retry_scid.datalen = NET_QUIC_SERVER_CIDLEN;
+                    if (net_quic_random_bytes(
+                            retry_scid.data,
+                            retry_scid.datalen
+                        ) != 0) {
+                        croak("unable to generate Retry connection ID");
+                    }
+
+                    now = net_quic_system_now();
+                    tokenlen = ngtcp2_crypto_generate_retry_token2(
+                        token,
+                        (const uint8_t *)secret,
+                        (size_t)secretlen,
+                        hd.version,
+                        &peer_addr.sa,
+                        peer_addrlen,
+                        &retry_scid,
+                        &hd.dcid,
+                        now
+                    );
+
+                    if (tokenlen < 0) {
+                        croak("unable to generate QUIC Retry token");
+                    }
+
+                    nwrite = ngtcp2_crypto_write_retry(
+                        response,
+                        sizeof(response),
+                        hd.version,
+                        &hd.scid,
+                        &retry_scid,
+                        &hd.dcid,
+                        token,
+                        (size_t)tokenlen
+                    );
+
+                    if (nwrite < 0) {
+                        croak("unable to write QUIC Retry packet");
+                    }
+
+                    av_push(av, newSViv(1));
+                    av_push(
+                        av,
+                        newSVpvn((const char *)response, (STRLEN)nwrite)
+                    );
+                    RETVAL = newRV_noinc((SV *)av);
+                } else if (
+                    hd.tokenlen != 0 &&
+                    hd.token[0] == NGTCP2_CRYPTO_TOKEN_MAGIC_RETRY2
+                ) {
+                    now = net_quic_system_now();
+                    memset(&odcid, 0, sizeof(odcid));
+
+                    rv = ngtcp2_crypto_verify_retry_token2(
+                        &odcid,
+                        hd.token,
+                        hd.tokenlen,
+                        (const uint8_t *)secret,
+                        (size_t)secretlen,
+                        hd.version,
+                        &peer_addr.sa,
+                        peer_addrlen,
+                        &hd.dcid,
+                        NET_QUIC_RETRY_TOKEN_TIMEOUT,
+                        now
+                    );
+
+                    if (rv == 0) {
+                        av_push(av, newSViv(2));
+                        av_push(
+                            av,
+                            newSVpvn(
+                                (const char *)odcid.data,
+                                (STRLEN)odcid.datalen
+                            )
+                        );
+                        RETVAL = newRV_noinc((SV *)av);
+                    } else {
+                        nwrite = ngtcp2_crypto_write_connection_close(
+                            response,
+                            sizeof(response),
+                            hd.version,
+                            &hd.scid,
+                            &hd.dcid,
+                            NGTCP2_INVALID_TOKEN,
+                            NULL,
+                            0
+                        );
+
+                        if (nwrite < 0) {
+                            av_push(av, newSViv(0));
+                        } else {
+                            av_push(av, newSViv(1));
+                            av_push(
+                                av,
+                                newSVpvn(
+                                    (const char *)response,
+                                    (STRLEN)nwrite
+                                )
+                            );
+                        }
+                        RETVAL = newRV_noinc((SV *)av);
+                    }
+                } else if (hd.tokenlen != 0 && validate_address) {
+                    retry_scid.datalen = NET_QUIC_SERVER_CIDLEN;
+                    if (net_quic_random_bytes(
+                            retry_scid.data,
+                            retry_scid.datalen
+                        ) != 0) {
+                        croak("unable to generate Retry connection ID");
+                    }
+
+                    now = net_quic_system_now();
+                    tokenlen = ngtcp2_crypto_generate_retry_token2(
+                        token,
+                        (const uint8_t *)secret,
+                        (size_t)secretlen,
+                        hd.version,
+                        &peer_addr.sa,
+                        peer_addrlen,
+                        &retry_scid,
+                        &hd.dcid,
+                        now
+                    );
+
+                    if (tokenlen < 0) {
+                        croak("unable to generate QUIC Retry token");
+                    }
+
+                    nwrite = ngtcp2_crypto_write_retry(
+                        response,
+                        sizeof(response),
+                        hd.version,
+                        &hd.scid,
+                        &retry_scid,
+                        &hd.dcid,
+                        token,
+                        (size_t)tokenlen
+                    );
+
+                    if (nwrite < 0) {
+                        croak("unable to write QUIC Retry packet");
+                    }
+
+                    av_push(av, newSViv(1));
+                    av_push(
+                        av,
+                        newSVpvn((const char *)response, (STRLEN)nwrite)
+                    );
+                    RETVAL = newRV_noinc((SV *)av);
+                } else {
+                    av_push(av, newSViv(2));
+                    av_push(av, newSV(0));
+                    RETVAL = newRV_noinc((SV *)av);
+                }
             }
         }
     OUTPUT:

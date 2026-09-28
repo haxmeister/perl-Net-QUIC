@@ -7,6 +7,11 @@ use Net::QUIC ();
 
 our $VERSION = $Net::QUIC::VERSION;
 
+sub _new {
+    my ($class, $data, $local, $peer) = @_;
+    return bless [$data, $local, $peer], $class;
+}
+
 sub data  { $_[0]->[0] }
 sub local { $_[0]->[1] }
 sub peer  { $_[0]->[2] }

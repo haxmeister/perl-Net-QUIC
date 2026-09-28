@@ -10,6 +10,7 @@ use Net::QUIC::Endpoint;
 
 my $server_local = pack_sockaddr_in(4437, inet_aton('127.0.0.1'));
 my $client_local = pack_sockaddr_in(40005, inet_aton('127.0.0.1'));
+my $wrong_client_local = pack_sockaddr_in(40006, inet_aton('127.0.0.1'));
 my $alpn = 'net-quic-front-door-test';
 my $cert_file = "$FindBin::Bin/data/server-cert.pem";
 my $key_file = "$FindBin::Bin/data/server-key.pem";
@@ -104,6 +105,28 @@ $client->receive_datagram(
 
 my $retried_initial = $client->next_datagram;
 ok(defined($retried_initial), 'client answers Retry with another Initial');
+
+$server->receive_datagram(
+    $retried_initial->data,
+    $server_local,
+    $wrong_client_local,
+);
+
+ok(
+    !defined($server->next_connection),
+    'Retry token cannot be replayed from a different peer address',
+);
+
+my $invalid_token_response = $server->next_datagram;
+ok(
+    defined($invalid_token_response),
+    'invalid address-bound Retry token gets a stateless rejection',
+);
+is(
+    $invalid_token_response->peer,
+    $wrong_client_local,
+    'stateless rejection is addressed to the peer that used the bad token',
+);
 
 $server->receive_datagram(
     $retried_initial->data,

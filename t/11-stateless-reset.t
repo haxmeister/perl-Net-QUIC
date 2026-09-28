@@ -230,7 +230,18 @@ my $issued_cid = $server->_packet_dcid(
 ok(defined($issued_cid), 'probe contains a server-issued destination CID');
 ok(exists($server->{routes}{$issued_cid}), 'issued CID is routed before simulated state loss');
 
-delete $server->{routes}{$issued_cid};
+@{$server->{connections}} = ();
+@{$server->{pending_connections}} = ();
+%{$server->{routes}} = ();
+$server->{tx_cursor} = 0;
+undef $accepted;
+
+is(
+    $server->_managed_connection_count,
+    0,
+    'simulated state loss removes the server Connection before reset',
+);
+is($server->_route_count, 0, 'simulated state loss removes all CID routes');
 
 $server->receive_datagram(
     $probe->data,
@@ -239,15 +250,15 @@ $server->receive_datagram(
 );
 
 my $known_reset = $server->next_datagram;
-ok(defined($known_reset), 'lost route for issued CID gets a stateless reset');
+ok(defined($known_reset), 'lost Connection state for issued CID gets a stateless reset');
 ok(
     length($known_reset->data) < length($probe->data),
     'issued-CID reset is smaller than its triggering packet',
 );
 is(
     $server->_managed_connection_count,
-    1,
-    'stateless reset path does not create another Connection',
+    0,
+    'stateless reset path does not recreate the lost Connection',
 );
 ok(
     !defined($server->next_connection),

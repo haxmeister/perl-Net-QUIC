@@ -239,7 +239,7 @@ net_quic_strdup_len(const char *src, size_t len)
     return dest;
 }
 
-#include "xs/net_quic_tls.h"
+#include "net_quic_tls.h"
 
 static void
 net_quic_endpoint_free(net_quic_endpoint *ep)

@@ -65,14 +65,15 @@ _crypto_self_test()
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Endpoint
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
-    const char *class
+_client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
+    SV *class_sv
     SV *local_sv
     SV *peer_sv
     SV *alpn_sv
     SV *server_name_sv
     PREINIT:
         net_quic_endpoint *ep = NULL;
+        const char *class;
         const char *local;
         const char *peer;
         const char *alpn;
@@ -89,6 +90,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         ngtcp2_cid scid;
         int rv;
     CODE:
+        net_quic_trace("xs entry");
+        class = SvPV_nolen(class_sv);
+        net_quic_trace("xs class");
         local = SvPVbyte(local_sv, locallen);
         net_quic_trace("xs args");
         peer = SvPVbyte(peer_sv, peerlen);

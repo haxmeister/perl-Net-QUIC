@@ -5,7 +5,7 @@ use warnings;
 
 use XSLoader ();
 
-our $VERSION = '0.001_001';
+our $VERSION = '0.001_002';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -32,9 +32,9 @@ The library is intentionally event-loop neutral. Net::QUIC owns QUIC and TLS
 protocol state. The application or integration layer owns UDP sockets,
 readiness notification, and scheduling.
 
-This is an early development version. The first implementation step proves the
-native binding and TLS helper selected by Alien::ngtcp2. The connection and
-stream API is still being designed.
+The first transport-facing API is L<Net::QUIC::Endpoint>. An event-loop
+integration feeds received UDP datagrams into an endpoint, sends the datagrams
+it produces, and schedules the timeout it requests.
 
 Normal applications should not need to choose a TLS backend. Alien::ngtcp2
 selects one that fits the host system when Net::QUIC is built.
@@ -64,19 +64,31 @@ information. Application code should not need to change behavior based on it.
 
 Net::QUIC does not choose an event loop.
 
-A Linux::Event, IO::Async, or other integration will eventually feed incoming
-UDP packets and time information into Net::QUIC, send the packets Net::QUIC
-produces, and arrange the next requested timeout.
+The integration contract is deliberately small:
 
-Keeping that boundary small lets one QUIC implementation work with different
-Perl networking systems.
+    UDP packet arrives
+        -> $endpoint->receive_datagram(...)
+
+    Net::QUIC has packets to send
+        -> $endpoint->next_datagram
+
+    Net::QUIC needs a timer
+        -> $endpoint->timeout_after
+
+    Timer fires
+        -> $endpoint->handle_timeout
+
+See L<Net::QUIC::Endpoint> for the complete cycle.
 
 =head1 STATUS
 
-The native binding is under active development. The public connection and
-stream API is not stable yet.
+The native client endpoint and event-loop boundary are under active
+development. Stream handling, server endpoints, and the final certificate
+verification API are not stable yet.
 
 =head1 SEE ALSO
+
+L<Net::QUIC::Endpoint>
 
 L<Alien::ngtcp2>
 

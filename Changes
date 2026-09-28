@@ -1,5 +1,13 @@
 Revision history for Net-QUIC
 
+0.001_002  2026-09-27
+    - Add the first real client QUIC endpoint.
+    - Add the event-loop integration boundary: receive_datagram,
+      next_datagram, timeout_after, and handle_timeout.
+    - Add Net::QUIC::Datagram for outbound UDP payload and path data.
+    - Generate a real QUIC Initial packet in the native test suite.
+    - Keep UDP sockets and timers outside Net::QUIC.
+
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.
     - Require Alien::ngtcp2 0.02.

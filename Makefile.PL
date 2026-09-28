@@ -64,6 +64,7 @@ WriteMakefile(
 
     PREREQ_PM => {
         'Alien::ngtcp2' => '0.02',
+        'Carp'          => 0,
         'XSLoader'      => 0,
     },
 
@@ -83,6 +84,14 @@ WriteMakefile(
             'Net::QUIC' => {
                 file    => 'lib/Net/QUIC.pm',
                 version => MM->parse_version('lib/Net/QUIC.pm'),
+            },
+            'Net::QUIC::Datagram' => {
+                file    => 'lib/Net/QUIC/Datagram.pm',
+                version => MM->parse_version('lib/Net/QUIC/Datagram.pm'),
+            },
+            'Net::QUIC::Endpoint' => {
+                file    => 'lib/Net/QUIC/Endpoint.pm',
+                version => MM->parse_version('lib/Net/QUIC/Endpoint.pm'),
             },
         },
         resources => {

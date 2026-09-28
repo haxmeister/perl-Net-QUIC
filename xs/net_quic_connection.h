@@ -67,6 +67,7 @@ struct net_quic_connection {
     int is_server;
 
     uint8_t txbuf[NET_QUIC_TX_BUFSIZE];
+    int tx_batch_active;
 
     int stream_tx_pending;
     int64_t stream_tx_id;

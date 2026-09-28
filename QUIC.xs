@@ -581,13 +581,17 @@ _next_datagram(self)
         }
 
         if (nwrite == 0) {
+            if (ep->tx_batch_active) {
+                ngtcp2_conn_update_pkt_tx_time(ep->conn, now);
+                ep->tx_batch_active = 0;
+            }
             RETVAL = &PL_sv_undef;
         } else {
             if (ps.path.local.addr == NULL || ps.path.remote.addr == NULL) {
                 croak("ngtcp2 produced a datagram without a network path");
             }
 
-            ngtcp2_conn_update_pkt_tx_time(ep->conn, now);
+            ep->tx_batch_active = 1;
             RETVAL = net_quic_datagram_new(
                 ep->txbuf,
                 (size_t)nwrite,

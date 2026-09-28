@@ -2,33 +2,28 @@
 
 ## Current branch
 
-feature/stateless-reset
+feature/stream-state-reclamation
 
 Current main baseline:
 
-ad7ff88f999142935f22bbfe18141d61f5b22cfe
+a35acccff0fe410e6915860ea1a0cc682fbb895f
 
-Validated branch checkpoint before this handoff update:
+Previous completed work:
 
-c691bf69fd3e01665ca1630472edcb6e37c9069d
+- feature/stateless-reset was merged to main through PR #2
+- validated Stateless Reset checkpoint: c691bf69fd3e01665ca1630472edcb6e37c9069d
+- validated full matrix: GitHub Actions run 36499381840, 15/15 PASS
+- merged main commit: a35acccff0fe410e6915860ea1a0cc682fbb895f
 
-Draft PR:
+Immediate branch scope:
 
-#2
-
-Immediate branch scope is complete:
-
-- implement Stateless Reset for unknown server connection IDs
-- derive reset tokens from an Endpoint-private secret and the destination CID
-- advertise the initial server reset token during the handshake
-- derive reset tokens for later server-issued CIDs
-- reset only eligible unknown short-header packets
-- drop unknown long-header and undersized packets
-- keep reset responses smaller than the packets that trigger them
-- do not allocate Connection state just to answer with a reset
-- preserve the existing public Endpoint API and event-loop boundary
-
-The branch is not merged into main.
+- reclaim closed native per-stream state when it is no longer needed
+- do not free state while a public Net::QUIC::Stream object can still use it
+- do not free state while an incoming-stream queue entry still refers to it
+- preserve stream FIN, reset, acknowledgement, and flow-control behavior
+- preserve round-robin transmit scheduling
+- avoid changing the public Stream API unless correctness requires it
+- keep the existing Endpoint / Connection / Stream ownership boundary clear
 
 ## Purpose
 

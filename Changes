@@ -85,6 +85,12 @@ Revision history for Net-QUIC
     - Test unknown connection IDs, complete server connection-state loss, and
       normally retired connection IDs, including client recognition of the
       advertised reset token.
+    - Reclaim closed native stream state once no Perl Stream object or pending
+      incoming-stream queue entry needs it.
+    - Keep closed stream status and buffered receive data available for the
+      lifetime of the public Stream object.
+    - Test ownership transfer from the pending incoming-stream queue to a
+      returned Stream object and verify native stream counts return to zero.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

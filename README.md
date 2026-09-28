@@ -104,7 +104,7 @@ $stream->send("hello");
 $stream->finish;
 ```
 
-C<finish> closes only the local send side cleanly. The peer can still send data
+`finish` closes only the local send side cleanly. The peer can still send data
 back on a bidirectional stream.
 
 Streams opened by the peer are pulled from the connection:
@@ -117,12 +117,12 @@ while (my $stream = $connection->next_stream) {
 }
 ```
 
-QUIC streams carry ordered bytes, not messages. One C<send> call is not
-guaranteed to become one C<next_data> result. Applications that need messages
+QUIC streams carry ordered bytes, not messages. One `send` call is not
+guaranteed to become one `next_data` result. Applications that need messages
 must add their own framing.
 
-After C<send>, C<finish>, or C<reset>, the surrounding integration uses the
-same endpoint cycle as before: drain C<next_datagram> and rearm the endpoint
+After `send`, `finish`, or `reset`, the surrounding integration uses the
+same endpoint cycle as before: drain `next_datagram` and rearm the endpoint
 timer.
 
 The public server Endpoint and the final production certificate verification

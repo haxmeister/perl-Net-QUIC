@@ -1,4 +1,17 @@
+#include <stdio.h>
 #include <stdlib.h>
+
+static FILE *
+net_quic_system_fopen(const char *path, const char *mode)
+{
+    return fopen(path, mode);
+}
+
+static int
+net_quic_system_fclose(FILE *fp)
+{
+    return fclose(fp);
+}
 
 static void
 net_quic_system_free(void *ptr)

@@ -162,13 +162,13 @@ net_quic_tls_server_prepare(
         return "unable to load Picotls server certificate";
     }
 
-    fp = fopen(key_file, "rb");
+    fp = net_quic_system_fopen(key_file, "rb");
     if (fp == NULL) {
         return "unable to open Picotls server private key";
     }
 
     pkey = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
-    fclose(fp);
+    net_quic_system_fclose(fp);
     if (pkey == NULL) {
         return "unable to parse Picotls server private key";
     }

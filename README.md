@@ -125,8 +125,38 @@ After `send`, `finish`, or `reset`, the surrounding integration uses the
 same endpoint cycle as before: drain `next_datagram` and rearm the endpoint
 timer.
 
-The public server Endpoint and the final production certificate verification
-API are still under development.
+The first multi-connection server Endpoint is implemented, but the server
+front door is still under development. Production client certificate
+verification is also not implemented yet.
+
+## Server endpoint
+
+A server uses the same UDP and timer boundary while routing more than one QUIC
+connection:
+
+```perl
+my $endpoint = Net::QUIC::Endpoint->server(
+    alpn             => 'my-protocol',
+    certificate_file => 'server-cert.pem',
+    private_key_file => 'server-key.pem',
+);
+
+$endpoint->receive_datagram($bytes, $local, $peer);
+
+while (my $connection = $endpoint->next_connection) {
+    # A new peer has created a Connection.
+    # Check $connection->ready when handshake completion matters.
+}
+```
+
+The integration still drains `next_datagram`, schedules
+`timeout_after`, and calls `handle_timeout` exactly as it does for a client
+endpoint. The server Endpoint chooses the right Connection from the QUIC
+destination connection ID and uses one aggregate timer for all Connections.
+
+The server side is still early development. Retry/address validation, version
+negotiation responses, automatic connection retirement, and shared server TLS
+credential state are not implemented yet.
 
 ## Native dependency
 

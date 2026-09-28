@@ -23,6 +23,13 @@ my $server = Net::QUIC::Endpoint->server(
     private_key_file => $key_file,
 );
 
+$server->receive_datagram(
+    "not a QUIC packet",
+    $server_local,
+    $client_local[0],
+);
+ok(!defined($server->next_connection), 'invalid datagram does not create a connection');
+
 my @client = map {
     Net::QUIC::Endpoint->client(
         local       => $_,

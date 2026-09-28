@@ -30,6 +30,14 @@ Revision history for Net-QUIC
       timers instead of depending on CPU timing.
     - Test concurrent streams, unidirectional streams, FIN, and reset across
       the full portability matrix.
+    - Add the first multi-connection server Endpoint.
+    - Route server packets by QUIC destination connection ID and track
+      connection IDs issued and retired by ngtcp2.
+    - Add next_connection for pulling newly created server Connections.
+    - Aggregate all server Connection timers behind the same Endpoint timer.
+    - Schedule outbound server datagrams fairly across managed Connections.
+    - Test two simultaneous clients, handshakes, short-header routing, and
+      streams through one server Endpoint.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

@@ -93,10 +93,13 @@ sub _server_receive_datagram {
             $self->{private_key_file},
         );
 
+        $connection->_receive_datagram($bytes, $local, $peer);
+
         $self->{routes}{$initial_dcid} = $connection;
         push @{$self->{connections}}, $connection;
         push @{$self->{pending_connections}}, $connection;
         $self->_sync_server_routes($connection);
+        return;
     }
 
     $connection->_receive_datagram($bytes, $local, $peer);
@@ -244,9 +247,9 @@ the transport-facing side of QUIC and gives the integration datagrams to send
 and a timeout to schedule.
 
 A QUIC connection is represented separately by L<Net::QUIC::Connection>.
-For a client endpoint there is currently one connection. A future server
-endpoint can use the same event-loop boundary while managing several
-connections behind one UDP socket.
+A client endpoint owns one connection. A server endpoint can manage several
+connections behind one UDP socket and routes incoming packets by QUIC
+destination connection ID.
 
 For a client integration, the basic cycle is:
 
@@ -273,11 +276,43 @@ Creates a client endpoint and its first L<Net::QUIC::Connection>.
 C<local>, C<peer>, and C<alpn> are required. C<server_name> is used for TLS
 SNI when supplied.
 
+=head2 server
+
+    my $endpoint = Net::QUIC::Endpoint->server(
+        alpn             => 'my-protocol',
+        certificate_file => 'server-cert.pem',
+        private_key_file => 'server-key.pem',
+    );
+
+Creates a server endpoint. The UDP socket still belongs to the integration
+layer. One server endpoint can route packets for multiple QUIC connections.
+
+This is an early server API. The current implementation does not yet provide
+Retry/address validation, version-negotiation responses, or automatic
+connection retirement. Server certificate and private-key files are currently
+loaded for each new connection rather than shared through one server TLS
+context.
+
 =head2 connection
 
     my $connection = $endpoint->connection;
 
-Returns the client connection owned by this endpoint.
+Returns the client connection owned by a client endpoint.
+
+A server endpoint manages multiple connections, so calling C<connection> on a
+server endpoint is an error. Use C<next_connection> instead.
+
+=head2 next_connection
+
+    while (my $connection = $endpoint->next_connection) {
+        ...
+    }
+
+Server only. Returns the next newly created connection, or undef when there is
+none waiting.
+
+A connection can be returned before its TLS handshake is complete. Use
+C<$connection-E<gt>ready> when the application needs handshake readiness.
 
 =head2 receive_datagram
 
@@ -300,6 +335,9 @@ Returns the next UDP datagram QUIC wants sent, or undef if none is ready.
 Returns the number of seconds until QUIC next needs timer service. It may
 return zero when the timeout is already due, or undef when no timeout is
 currently needed.
+
+For a server endpoint this is the earliest timeout among all managed
+connections, so the integration still needs only one endpoint timer.
 
 =head2 handle_timeout
 

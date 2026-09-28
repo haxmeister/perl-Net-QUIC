@@ -262,24 +262,66 @@ from 5.20 through 5.44 remains intact, along with macOS and Windows coverage.
 
 ## Next useful work
 
-The event-loop boundary, Picotls handshake, and first public multi-stream API
-are implemented and tested across the full 15-job CI matrix.
+The event-loop boundary, Picotls handshake, first public multi-stream API, and
+first multi-connection server Endpoint are implemented.
 
-The private _server_new constructor is only a development proof. Do not turn it
-into the public server API directly.
+Server Endpoint routing proof:
+
+- branch: feature/server-endpoint
+- implementation commit: cdde5a1308114564c1dfe34e179acf5ff2d5094c
+- GitHub Actions run: 36466542380
+- full 15-job matrix: PASS
+- 7 test files / 77 tests on Linux 5.44 and Windows 5.44
+
+The server Endpoint now owns a CID routing table and multiple Connection
+objects behind one UDP boundary. New acceptable Initial packets create a
+Connection. Server-issued connection IDs are queued from ngtcp2 callbacks and
+registered with the Endpoint; retired IDs are removed. Short-header stream
+traffic is therefore routed to the correct Connection after the handshake.
+
+The public server-facing shape is:
+
+    Net::QUIC::Endpoint->server(
+        alpn             => ...,
+        certificate_file => ...,
+        private_key_file => ...,
+    )
+
+    $endpoint->next_connection
+
+The ordinary Endpoint integration contract does not change:
+
+    receive_datagram
+    next_datagram
+    timeout_after
+    handle_timeout
+
+For a server, next_datagram schedules managed Connections round-robin and
+timeout_after returns the earliest Connection timeout.
+
+The private Connection->_server_new constructor remains an implementation
+detail behind Endpoint->server.
+
+Server work still needed before calling this production-ready:
+
+- Retry/address validation for new clients
+- version-negotiation responses
+- automatic retirement/removal of closed Connections and their routes
+- one shared server TLS credential/context setup instead of loading the
+  certificate and private key separately for every new Connection
+- stateless-reset policy for unknown connection IDs
 
 Next:
 
-1. Design the public server Endpoint around CID routing and multiple Connection
-   objects behind one UDP socket, keeping the private proof constructor private.
+1. Build the remaining stateless server front door, starting with
+   Retry/address validation and version negotiation.
 2. Add production client certificate verification before treating the client
    TLS path as production-ready.
-3. Reclaim closed per-stream state when no public object or incoming queue entry
-   needs it, and consider fixed-size transmit chunks for earlier ACK memory
-   release.
-4. Write a small Linux::Event adapter as the first framework integration
-   example after the raw contract is stable.
-5. Keep HTTP/3 out of this transport layer for now.
+3. Add Connection retirement, then reclaim closed per-stream state when no
+   public object or incoming queue entry needs it.
+4. Consider fixed-size transmit chunks for earlier ACK memory release.
+5. Write a small Linux::Event adapter after the raw contract is stable.
+6. Keep HTTP/3 out of this transport layer for now.
 
 Certificate verification is still future work. The current client proof does
 not configure production server-certificate verification, so the self-signed

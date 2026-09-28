@@ -84,12 +84,15 @@ See L<Net::QUIC::Endpoint> for the complete cycle.
 
 =head1 STATUS
 
-The native client endpoint, event-loop boundary, and first public stream API
-are implemented. Bidirectional and unidirectional streams can send and receive
-ordered bytes, finish cleanly, and reset.
+The native client endpoint, event-loop boundary, first public stream API, and
+first multi-connection server Endpoint are implemented. Bidirectional and
+unidirectional streams can send and receive ordered bytes, finish cleanly, and
+reset.
 
-The public server Endpoint and the final production certificate verification
-API are still under development.
+The server front door is still early: Retry/address validation, version
+negotiation responses, shared server TLS credential state, and automatic
+connection retirement are not implemented yet. Production client certificate
+verification is also still under development.
 
 =head1 SEE ALSO
 

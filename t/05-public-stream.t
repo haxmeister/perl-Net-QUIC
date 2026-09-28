@@ -16,6 +16,8 @@ my $alpn = 'net-quic-public-stream-test';
 my $cert_file = "$FindBin::Bin/data/server-cert.pem";
 my $key_file = "$FindBin::Bin/data/server-key.pem";
 
+my $server_tls = Net::QUIC::_ServerTLS->_new($cert_file, $key_file);
+
 sub pump_pair {
     my ($client, $server) = @_;
     my $progress = 0;
@@ -96,8 +98,7 @@ my $server = Net::QUIC::Connection->_server_new(
     $server_local,
     $client_local,
     $alpn,
-    $cert_file,
-    $key_file,
+    $server_tls,
 );
 
 $server->_receive_datagram(

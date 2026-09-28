@@ -10,7 +10,7 @@
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(WIN32)
 # include <windows.h>
 #else
 # include <time.h>
@@ -45,7 +45,7 @@
 static void
 net_quic_trace(const char *message)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(WIN32)
     fprintf(stderr, "NETQUIC-WIN %s\n", message);
     fflush(stderr);
 #else
@@ -113,7 +113,7 @@ struct net_quic_endpoint {
 static ngtcp2_tstamp
 net_quic_now(void)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(WIN32)
     LARGE_INTEGER freq;
     LARGE_INTEGER counter;
     uint64_t whole;

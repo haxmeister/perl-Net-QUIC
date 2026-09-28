@@ -240,7 +240,7 @@ _client_new(class_sv, local_sv, peer_sv, alpn_sv, server_name_sv)
         }
 
         net_quic_trace(aTHX_ "xs before tls_finish");
-        if (net_quic_tls_finish(ep) != 0) {
+        if (net_quic_tls_finish(aTHX_ ep) != 0) {
             net_quic_endpoint_free(aTHX_ ep);
             croak("unable to configure the selected QUIC TLS backend");
         }

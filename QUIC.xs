@@ -65,41 +65,50 @@ _crypto_self_test()
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
     const char *class
     SV *local_sv
     SV *peer_sv
     SV *alpn_sv
     SV *server_name_sv
+    SV *ca_file_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
         const char *peer;
         const char *alpn;
         const char *server_name;
+        const char *ca_file;
         STRLEN locallen;
         STRLEN peerlen;
         STRLEN alpnlen;
         STRLEN server_namelen;
+        STRLEN ca_file_len;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
         ngtcp2_transport_params params;
         ngtcp2_path path;
         ngtcp2_cid dcid;
         ngtcp2_cid scid;
+        const char *tls_error;
         int rv;
     CODE:
         local = SvPVbyte(local_sv, locallen);
         peer = SvPVbyte(peer_sv, peerlen);
         alpn = SvPVbyte(alpn_sv, alpnlen);
         server_name = SvPVbyte(server_name_sv, server_namelen);
+        ca_file = SvPVbyte(ca_file_sv, ca_file_len);
 
         if (alpnlen == 0 || alpnlen > 255) {
             croak("alpn must contain 1 to 255 bytes");
         }
-        if (server_namelen > 255 ||
+        if (server_namelen == 0 ||
+            server_namelen > 255 ||
             memchr(server_name, '\0', (size_t)server_namelen) != NULL) {
-            croak("server_name must be at most 255 bytes and cannot contain NUL");
+            croak("server_name must contain 1 to 255 bytes and cannot contain NUL");
+        }
+        if (memchr(ca_file, '\0', (size_t)ca_file_len) != NULL) {
+            croak("ca_file path cannot contain NUL");
         }
 
         Newxz(ep, 1, net_quic_connection);
@@ -138,9 +147,10 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv)
         ep->conn_ref.get_conn = net_quic_get_conn;
         ep->conn_ref.user_data = ep;
 
-        if (net_quic_tls_client_prepare(ep) != 0) {
+        tls_error = net_quic_tls_client_prepare(ep, ca_file);
+        if (tls_error != NULL) {
             net_quic_connection_free(aTHX_ ep);
-            croak("unable to initialize Picotls for QUIC");
+            croak("%s", tls_error);
         }
 
         memset(&callbacks, 0, sizeof(callbacks));

@@ -150,7 +150,7 @@ net_quic_tls_prepare(net_quic_endpoint *ep)
 }
 
 static int
-net_quic_tls_finish(net_quic_endpoint *ep)
+net_quic_tls_finish(pTHX_ net_quic_endpoint *ep)
 {
     unsigned char alpn_wire[256];
 
@@ -232,8 +232,11 @@ net_quic_tls_finish(net_quic_endpoint *ep)
     ngtcp2_conn_set_tls_native_handle(ep->conn, ep->ssl);
     return 0;
 #elif defined(NET_QUIC_CRYPTO_PICOTLS)
-    ep->picotls_ctx.handshake_properties.additional_extensions =
-        (ptls_raw_extension_t *)calloc(2, sizeof(ptls_raw_extension_t));
+    Newxz(
+        ep->picotls_ctx.handshake_properties.additional_extensions,
+        2,
+        ptls_raw_extension_t
+    );
     if (ep->picotls_ctx.handshake_properties.additional_extensions == NULL) {
         return -1;
     }
@@ -268,7 +271,7 @@ net_quic_tls_finish(net_quic_endpoint *ep)
 }
 
 static void
-net_quic_tls_cleanup(net_quic_endpoint *ep)
+net_quic_tls_cleanup(pTHX_ net_quic_endpoint *ep)
 {
 #if defined(NET_QUIC_CRYPTO_OPENSSL)
     if (ep->ssl != NULL) {
@@ -316,7 +319,7 @@ net_quic_tls_cleanup(net_quic_endpoint *ep)
     }
 #elif defined(NET_QUIC_CRYPTO_PICOTLS)
     ngtcp2_crypto_picotls_deconfigure_session(&ep->picotls_ctx);
-    free(ep->picotls_ctx.handshake_properties.additional_extensions);
+    Safefree(ep->picotls_ctx.handshake_properties.additional_extensions);
     ep->picotls_ctx.handshake_properties.additional_extensions = NULL;
     if (ep->picotls_ctx.ptls != NULL) {
         *ptls_get_data_ptr(ep->picotls_ctx.ptls) = NULL;

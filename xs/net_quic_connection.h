@@ -78,6 +78,17 @@ struct net_quic_connection {
     char *server_name;
     int ready;
     int is_server;
+    int retired;
+    int close_wait;
+    ngtcp2_tstamp retirement_deadline;
+
+    uint8_t closebuf[NGTCP2_MAX_UDP_PAYLOAD_SIZE];
+    size_t closebuflen;
+    int closebuf_pending;
+    ngtcp2_sockaddr_union close_local_addr;
+    ngtcp2_socklen close_local_addrlen;
+    ngtcp2_sockaddr_union close_peer_addr;
+    ngtcp2_socklen close_peer_addrlen;
 
     net_quic_cid_event *cid_event_head;
     net_quic_cid_event *cid_event_tail;
@@ -299,6 +310,49 @@ net_quic_copy_sockaddr(
 
     *destlen = (ngtcp2_socklen)srclen;
     return 0;
+}
+
+static int
+net_quic_copy_ngtcp2_addr(
+    ngtcp2_sockaddr_union *dest,
+    ngtcp2_socklen *destlen,
+    const ngtcp2_addr *src
+)
+{
+    if (src == NULL || src->addr == NULL ||
+        src->addrlen > sizeof(*dest)) {
+        return -1;
+    }
+
+    memset(dest, 0, sizeof(*dest));
+    memcpy(dest, src->addr, (size_t)src->addrlen);
+    *destlen = src->addrlen;
+    return 0;
+}
+
+static void
+net_quic_start_close_wait(
+    net_quic_connection *ep,
+    ngtcp2_tstamp now
+)
+{
+    ngtcp2_duration pto;
+    ngtcp2_duration wait;
+
+    if (ep->retired || ep->close_wait) {
+        return;
+    }
+
+    pto = ngtcp2_conn_get_pto2(ep->conn);
+    if (pto > UINT64_MAX / 3) {
+        wait = UINT64_MAX;
+    } else {
+        wait = pto * 3;
+    }
+
+    ep->close_wait = 1;
+    ep->retirement_deadline =
+        wait > UINT64_MAX - now ? UINT64_MAX : now + wait;
 }
 
 static char *

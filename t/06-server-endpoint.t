@@ -36,6 +36,7 @@ my @client = map {
         peer        => $server_local,
         alpn        => $alpn,
         server_name => 'localhost',
+        ca_file     => $cert_file,
     )
 } @client_local;
 

@@ -2,7 +2,20 @@
 
 ## Current branch
 
-feature/stream-proof
+feature/server-front-door
+
+Current main baseline:
+
+1decd967f0a4944232d9790fcf3db58dac8a2eb9
+
+Immediate branch scope:
+
+- add the stateless server front door
+- add Retry/address validation for new clients
+- add version-negotiation responses
+- keep UDP socket ownership outside Net::QUIC
+- preserve the existing Endpoint receive/send/timer contract
+- do not mix client certificate verification or Connection retirement into this branch unless required by the front-door design
 
 Baseline before the Picotls-only cleanup:
 

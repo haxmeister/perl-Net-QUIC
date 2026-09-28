@@ -139,6 +139,7 @@ my $endpoint = Net::QUIC::Endpoint->server(
     alpn             => 'my-protocol',
     certificate_file => 'server-cert.pem',
     private_key_file => 'server-key.pem',
+    validate_address => 1,
 );
 
 $endpoint->receive_datagram($bytes, $local, $peer);
@@ -154,8 +155,15 @@ The integration still drains `next_datagram`, schedules
 endpoint. The server Endpoint chooses the right Connection from the QUIC
 destination connection ID and uses one aggregate timer for all Connections.
 
-The server side is still early development. Retry/address validation, version
-negotiation responses, automatic connection retirement, and shared server TLS
+Unsupported QUIC versions are answered with a stateless Version Negotiation
+packet. Setting `validate_address => 1` enables stateless Retry before a new
+Connection is allocated. Retry tokens are authenticated, tied to the client's
+socket address, and accepted for 10 seconds. Address validation is optional and
+is off by default, avoiding the extra Retry round trip unless the application
+chooses it.
+
+The server side is still early development. Automatic connection retirement,
+stateless reset policy for unknown connection IDs, and shared server TLS
 credential state are not implemented yet.
 
 ## Native dependency

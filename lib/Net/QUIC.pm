@@ -89,10 +89,11 @@ first multi-connection server Endpoint are implemented. Bidirectional and
 unidirectional streams can send and receive ordered bytes, finish cleanly, and
 reset.
 
-The server front door is still early: Retry/address validation, version
-negotiation responses, shared server TLS credential state, and automatic
-connection retirement are not implemented yet. Production client certificate
-verification is also still under development.
+The server front door now handles Version Negotiation and optional stateless
+Retry/address validation before Connection allocation. Shared server TLS
+credential state, stateless reset policy for unknown connection IDs, and
+automatic connection retirement are not implemented yet. Production client
+certificate verification is also still under development.
 
 =head1 SEE ALSO
 

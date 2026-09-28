@@ -306,16 +306,27 @@ SNI when supplied.
         alpn             => 'my-protocol',
         certificate_file => 'server-cert.pem',
         private_key_file => 'server-key.pem',
+        validate_address => 1,
     );
 
 Creates a server endpoint. The UDP socket still belongs to the integration
 layer. One server endpoint can route packets for multiple QUIC connections.
 
-This is an early server API. The current implementation does not yet provide
-Retry/address validation, version-negotiation responses, or automatic
-connection retirement. Server certificate and private-key files are currently
-loaded for each new connection rather than shared through one server TLS
-context.
+Unsupported QUIC versions are answered statelessly with Version Negotiation
+before a Connection object is created.
+
+C<validate_address> is optional and defaults to false. When true, the first
+acceptable Initial from a new peer receives Retry instead of creating a
+Connection. The Retry token is authenticated, bound to the peer socket address,
+and valid for 10 seconds. Net::QUIC creates the Connection only after the peer
+returns a valid token. A token replayed from a different peer address is
+rejected without creating connection state.
+
+This is still an early server API. Automatic connection retirement, stateless
+reset policy for unknown connection IDs, and shared server TLS credential state
+are not implemented yet. Server certificate and private-key files are
+currently loaded for each new connection rather than shared through one server
+TLS context.
 
 =head2 connection
 

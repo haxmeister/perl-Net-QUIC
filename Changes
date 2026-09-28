@@ -38,6 +38,15 @@ Revision history for Net-QUIC
     - Schedule outbound server datagrams fairly across managed Connections.
     - Test two simultaneous clients, handshakes, short-header routing, and
       streams through one server Endpoint.
+    - Add a stateless server front door before Connection allocation.
+    - Send Version Negotiation for unsupported QUIC versions.
+    - Add optional Retry/address validation with validate_address.
+    - Generate authenticated Retry tokens bound to the peer socket address.
+    - Carry verified original destination and Retry connection IDs into the
+      server transport parameters.
+    - Reject Retry-token replay from a different peer address without creating
+      Connection state.
+    - Test a complete Retry handshake and stream exchange.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

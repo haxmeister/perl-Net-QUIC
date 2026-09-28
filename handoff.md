@@ -315,10 +315,28 @@ timeout_after returns the earliest Connection timeout.
 The private Connection->_server_new constructor remains an implementation
 detail behind Endpoint->server.
 
+The stateless server front door now exists on feature/server-front-door.
+
+Implemented:
+
+- unsupported versions receive Version Negotiation without Connection state
+- Version Negotiation advertises QUIC v1 and v2
+- Endpoint->server(validate_address => 1) enables stateless Retry
+- Retry tokens use an Endpoint-local random secret
+- Retry tokens are bound to the peer packed socket address
+- Retry tokens expire after 10 seconds
+- a valid Retry token carries the original destination CID into the eventual
+  Connection transport parameters
+- the Retry SCID is also recorded in the server transport parameters
+- invalid or address-replayed Retry tokens receive a stateless INVALID_TOKEN
+  connection close and do not allocate Connection state
+- the normal Endpoint receive/send/timer contract is unchanged
+
+Address validation is optional and off by default so applications do not pay an
+extra Retry round trip unless they request it.
+
 Server work still needed before calling this production-ready:
 
-- Retry/address validation for new clients
-- version-negotiation responses
 - automatic retirement/removal of closed Connections and their routes
 - one shared server TLS credential/context setup instead of loading the
   certificate and private key separately for every new Connection
@@ -326,15 +344,16 @@ Server work still needed before calling this production-ready:
 
 Next:
 
-1. Build the remaining stateless server front door, starting with
-   Retry/address validation and version negotiation.
-2. Add production client certificate verification before treating the client
+1. Add production client certificate verification before treating the client
    TLS path as production-ready.
-3. Add Connection retirement, then reclaim closed per-stream state when no
-   public object or incoming queue entry needs it.
-4. Consider fixed-size transmit chunks for earlier ACK memory release.
-5. Write a small Linux::Event adapter after the raw contract is stable.
-6. Keep HTTP/3 out of this transport layer for now.
+2. Add Connection retirement and route cleanup.
+3. Add shared server TLS credential/context state.
+4. Decide and implement stateless-reset policy for unknown connection IDs.
+5. Reclaim closed per-stream state when no public object or incoming queue
+   entry needs it.
+6. Consider fixed-size transmit chunks for earlier ACK memory release.
+7. Write a small Linux::Event adapter after the raw contract is stable.
+8. Keep HTTP/3 out of this transport layer for now.
 
 Certificate verification is still future work. The current client proof does
 not configure production server-certificate verification, so the self-signed

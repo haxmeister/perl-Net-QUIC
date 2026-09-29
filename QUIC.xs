@@ -1730,6 +1730,86 @@ _retired(self)
     OUTPUT:
         RETVAL
 
+SV *
+_transport_info(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        const ngtcp2_transport_params *params;
+        HV *hv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        params = ngtcp2_conn_get_local_transport_params(ep->conn);
+
+        hv = newHV();
+        hv_store(
+            hv,
+            "idle_timeout_ms",
+            15,
+            newSVuv((UV)(params->max_idle_timeout / NGTCP2_MILLISECONDS)),
+            0
+        );
+        hv_store(
+            hv,
+            "connection_window",
+            17,
+            newSVuv((UV)params->initial_max_data),
+            0
+        );
+        hv_store(
+            hv,
+            "stream_window_bidi_local",
+            24,
+            newSVuv((UV)params->initial_max_stream_data_bidi_local),
+            0
+        );
+        hv_store(
+            hv,
+            "stream_window_bidi_remote",
+            25,
+            newSVuv((UV)params->initial_max_stream_data_bidi_remote),
+            0
+        );
+        hv_store(
+            hv,
+            "stream_window_uni",
+            17,
+            newSVuv((UV)params->initial_max_stream_data_uni),
+            0
+        );
+        hv_store(
+            hv,
+            "max_bidi_streams",
+            16,
+            newSVuv((UV)params->initial_max_streams_bidi),
+            0
+        );
+        hv_store(
+            hv,
+            "max_uni_streams",
+            15,
+            newSVuv((UV)params->initial_max_streams_uni),
+            0
+        );
+        hv_store(
+            hv,
+            "active_connection_id_limit",
+            26,
+            newSVuv((UV)params->active_connection_id_limit),
+            0
+        );
+        hv_store(
+            hv,
+            "disable_active_migration",
+            24,
+            newSViv(params->disable_active_migration ? 1 : 0),
+            0
+        );
+
+        RETVAL = newRV_noinc((SV *)hv);
+    OUTPUT:
+        RETVAL
+
 int
 ready(self)
     SV *self

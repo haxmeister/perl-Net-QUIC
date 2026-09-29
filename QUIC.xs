@@ -10,7 +10,10 @@ net_quic_stream_close_limit_cb(
     void *stream_user_data
 )
 {
-    return net_quic_stream_close_cb(
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    int rv;
+
+    rv = net_quic_stream_close_cb(
         conn,
         flags,
         stream_id,
@@ -18,6 +21,19 @@ net_quic_stream_close_limit_cb(
         user_data,
         stream_user_data
     );
+    if (rv != 0) {
+        return rv;
+    }
+
+    if (!net_quic_stream_id_is_local(ep, stream_id)) {
+        if (net_quic_stream_id_is_bidirectional(stream_id)) {
+            ngtcp2_conn_extend_max_streams_bidi(conn, 1);
+        } else {
+            ngtcp2_conn_extend_max_streams_uni(conn, 1);
+        }
+    }
+
+    return 0;
 }
 
 static net_quic_server_tls *

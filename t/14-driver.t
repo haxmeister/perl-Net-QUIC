@@ -1,6 +1,7 @@
 use strict;
 use warnings;
 
+use Scalar::Util qw(refaddr);
 use Socket qw(inet_aton pack_sockaddr_in);
 use Test2::V0;
 
@@ -192,7 +193,8 @@ like(
     'receive before transport readiness is rejected',
 );
 
-is($driver->start, $driver, 'start returns the driver');
+is(refaddr($driver->start), refaddr($driver),
+    'start returns the driver');
 ok($driver->started, 'start marks driver started');
 is(\@sent, ['first'], 'start sends until adapter reports backpressure');
 is(\@scheduled, [0.25], 'start requests the current QUIC timeout');

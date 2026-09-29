@@ -1260,15 +1260,31 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
         );
 
         if (rv == NGTCP2_ERR_DRAINING || rv == NGTCP2_ERR_CLOSING) {
+            net_quic_capture_peer_close(ep);
             net_quic_start_close_wait(ep, now);
             if (rv == NGTCP2_ERR_CLOSING && ep->closebuflen != 0) {
                 ep->closebuf_pending = 1;
             }
         } else if (rv == NGTCP2_ERR_DROP_CONN) {
+            net_quic_set_close_info(
+                ep,
+                NET_QUIC_CLOSE_INFO_DROP,
+                NET_QUIC_CLOSE_INITIATOR_PEER,
+                0,
+                0,
+                rv
+            );
             ep->retired = 1;
             ep->close_wait = 0;
-        } else if (rv != 0) {
+        } else if (rv == NGTCP2_ERR_NOMEM ||
+                   rv == NGTCP2_ERR_INVALID_ARGUMENT ||
+                   rv == NGTCP2_ERR_CALLBACK_FAILURE ||
+                   rv == NGTCP2_ERR_INTERNAL) {
             croak("ngtcp2_conn_read_pkt failed: %s", ngtcp2_strerror(rv));
+        } else if (rv != 0) {
+            net_quic_capture_local_failure(ep, rv);
+            ep->retired = 1;
+            ep->close_wait = 0;
         }
 
         net_quic_stream_reclaim_closed(aTHX_ ep);
@@ -1329,14 +1345,40 @@ _handle_timeout(self)
         }
 
         rv = ngtcp2_conn_handle_expiry(ep->conn, now);
-        if (rv == NGTCP2_ERR_IDLE_CLOSE || rv == NGTCP2_ERR_DROP_CONN) {
+        if (rv == NGTCP2_ERR_IDLE_CLOSE) {
+            net_quic_set_close_info(
+                ep,
+                NET_QUIC_CLOSE_INFO_IDLE,
+                NET_QUIC_CLOSE_INITIATOR_LOCAL,
+                0,
+                0,
+                rv
+            );
+            ep->retired = 1;
+        } else if (rv == NGTCP2_ERR_DROP_CONN) {
+            net_quic_set_close_info(
+                ep,
+                NET_QUIC_CLOSE_INFO_DROP,
+                NET_QUIC_CLOSE_INITIATOR_LOCAL,
+                0,
+                0,
+                rv
+            );
             ep->retired = 1;
         } else if (rv == NGTCP2_ERR_DRAINING || rv == NGTCP2_ERR_CLOSING) {
+            net_quic_capture_peer_close(ep);
             net_quic_start_close_wait(ep, now);
-        } else if (rv != 0) {
+        } else if (rv == NGTCP2_ERR_NOMEM ||
+                   rv == NGTCP2_ERR_INVALID_ARGUMENT ||
+                   rv == NGTCP2_ERR_CALLBACK_FAILURE ||
+                   rv == NGTCP2_ERR_INTERNAL) {
             croak("ngtcp2_conn_handle_expiry failed: %s", ngtcp2_strerror(rv));
+        } else if (rv != 0) {
+            net_quic_capture_local_failure(ep, rv);
+            ep->retired = 1;
         } else if (ngtcp2_conn_in_closing_period2(ep->conn) ||
                    ngtcp2_conn_in_draining_period2(ep->conn)) {
+            net_quic_capture_peer_close(ep);
             net_quic_start_close_wait(ep, now);
         }
 
@@ -1380,6 +1422,15 @@ _close(self, app_error_code_uv = 0)
             0
         );
 
+        net_quic_set_close_info(
+            ep,
+            NET_QUIC_CLOSE_INFO_APPLICATION,
+            NET_QUIC_CLOSE_INITIATOR_LOCAL,
+            (uint64_t)app_error_code_uv,
+            0,
+            0
+        );
+
         ngtcp2_path_storage_zero(&ps);
         memset(&pi, 0, sizeof(pi));
 
@@ -1419,6 +1470,87 @@ _close(self, app_error_code_uv = 0)
         }
 
         net_quic_start_close_wait(ep, now);
+
+SV *
+_close_info(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        HV *hv;
+        const char *type;
+        const char *initiator;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (ep->close_info_type == NET_QUIC_CLOSE_INFO_NONE) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            switch (ep->close_info_type) {
+            case NET_QUIC_CLOSE_INFO_APPLICATION:
+                type = "application";
+                break;
+            case NET_QUIC_CLOSE_INFO_TRANSPORT:
+                type = "transport";
+                break;
+            case NET_QUIC_CLOSE_INFO_TLS:
+                type = "tls";
+                break;
+            case NET_QUIC_CLOSE_INFO_CERTIFICATE:
+                type = "certificate";
+                break;
+            case NET_QUIC_CLOSE_INFO_HANDSHAKE:
+                type = "handshake";
+                break;
+            case NET_QUIC_CLOSE_INFO_IDLE:
+                type = "idle";
+                break;
+            case NET_QUIC_CLOSE_INFO_DROP:
+                type = "drop";
+                break;
+            default:
+                type = "transport";
+                break;
+            }
+
+            initiator = ep->close_info_initiator == NET_QUIC_CLOSE_INITIATOR_PEER
+                ? "peer"
+                : "local";
+
+            hv = newHV();
+            hv_store(hv, "type", 4, newSVpv(type, 0), 0);
+            hv_store(hv, "initiator", 9, newSVpv(initiator, 0), 0);
+            hv_store(
+                hv,
+                "code",
+                4,
+                newSVuv((UV)ep->close_info_code),
+                0
+            );
+
+            if (ep->close_info_frame_type != 0) {
+                hv_store(
+                    hv,
+                    "frame_type",
+                    10,
+                    newSVuv((UV)ep->close_info_frame_type),
+                    0
+                );
+            }
+
+            if (ep->close_info_native_error != 0) {
+                hv_store(
+                    hv,
+                    "native_error",
+                    12,
+                    newSViv((IV)ep->close_info_native_error),
+                    0
+                );
+            }
+
+            RETVAL = newRV_noinc((SV *)hv);
+        }
+    OUTPUT:
+        RETVAL
 
 int
 _retired(self)

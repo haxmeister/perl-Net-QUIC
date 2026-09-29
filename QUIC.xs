@@ -156,10 +156,10 @@ net_quic_apply_transport_config(
     if (stream_window > NGTCP2_MAX_VARINT) {
         croak("stream_window is outside the supported range");
     }
-    if (max_bidi_streams > NGTCP2_MAX_STREAMS) {
+    if (max_bidi_streams > NGTCP2_MAX_VARINT) {
         croak("max_bidi_streams is outside the supported range");
     }
-    if (max_uni_streams > NGTCP2_MAX_STREAMS) {
+    if (max_uni_streams > NGTCP2_MAX_VARINT) {
         croak("max_uni_streams is outside the supported range");
     }
 

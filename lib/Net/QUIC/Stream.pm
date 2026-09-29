@@ -68,6 +68,7 @@ sub send {
         if !$self->can_send;
 
     $self->{connection}->_stream_send($self->{id}, $bytes);
+    $self->{connection}->_notify_output;
     return;
 }
 
@@ -78,6 +79,7 @@ sub finish {
         if !$self->can_send;
 
     $self->{connection}->_stream_finish($self->{id});
+    $self->{connection}->_notify_output;
     return;
 }
 
@@ -90,6 +92,7 @@ sub next_data {
     my $event = $self->{connection}->_stream_take_data($self->{id});
     return if !defined $event;
 
+    $self->{connection}->_notify_output;
     return $event->[0];
 }
 
@@ -116,6 +119,7 @@ sub reset {
         if $app_error_code !~ /\A\d+\z/;
 
     $self->{connection}->_stream_reset($self->{id}, $app_error_code);
+    $self->{connection}->_notify_output;
     return;
 }
 

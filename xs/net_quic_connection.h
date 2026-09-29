@@ -70,6 +70,19 @@ struct net_quic_cid_event {
 #define NET_QUIC_STREAM_AVAILABLE_BIDI 0x01u
 #define NET_QUIC_STREAM_AVAILABLE_UNI  0x02u
 
+#define NET_QUIC_CLOSE_INFO_NONE        0
+#define NET_QUIC_CLOSE_INFO_APPLICATION 1
+#define NET_QUIC_CLOSE_INFO_TRANSPORT   2
+#define NET_QUIC_CLOSE_INFO_TLS         3
+#define NET_QUIC_CLOSE_INFO_CERTIFICATE 4
+#define NET_QUIC_CLOSE_INFO_HANDSHAKE   5
+#define NET_QUIC_CLOSE_INFO_IDLE        6
+#define NET_QUIC_CLOSE_INFO_DROP        7
+
+#define NET_QUIC_CLOSE_INITIATOR_NONE  0
+#define NET_QUIC_CLOSE_INITIATOR_LOCAL 1
+#define NET_QUIC_CLOSE_INITIATOR_PEER  2
+
 struct net_quic_connection {
     ngtcp2_conn *conn;
     ngtcp2_crypto_conn_ref conn_ref;
@@ -92,6 +105,12 @@ struct net_quic_connection {
     int retired;
     int close_wait;
     ngtcp2_tstamp retirement_deadline;
+
+    int close_info_type;
+    int close_info_initiator;
+    uint64_t close_info_code;
+    uint64_t close_info_frame_type;
+    int close_info_native_error;
 
     size_t closebuflen;
     int closebuf_pending;
@@ -157,6 +176,109 @@ net_quic_extend_max_local_streams_uni_cb(
     }
 
     return 0;
+}
+
+static int
+net_quic_tls_alert_is_certificate(uint8_t alert)
+{
+    switch (alert) {
+    case 42:
+    case 43:
+    case 44:
+    case 45:
+    case 46:
+    case 48:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void
+net_quic_set_close_info(
+    net_quic_connection *ep,
+    int type,
+    int initiator,
+    uint64_t code,
+    uint64_t frame_type,
+    int native_error
+)
+{
+    if (ep->close_info_type != NET_QUIC_CLOSE_INFO_NONE) {
+        return;
+    }
+
+    ep->close_info_type = type;
+    ep->close_info_initiator = initiator;
+    ep->close_info_code = code;
+    ep->close_info_frame_type = frame_type;
+    ep->close_info_native_error = native_error;
+}
+
+static void
+net_quic_capture_peer_close(net_quic_connection *ep)
+{
+    const ngtcp2_ccerr *ccerr = ngtcp2_conn_get_ccerr(ep->conn);
+    int type = NET_QUIC_CLOSE_INFO_TRANSPORT;
+
+    if (ccerr->type == NGTCP2_CCERR_TYPE_APPLICATION) {
+        type = NET_QUIC_CLOSE_INFO_APPLICATION;
+    } else if (ccerr->type == NGTCP2_CCERR_TYPE_IDLE_CLOSE) {
+        type = NET_QUIC_CLOSE_INFO_IDLE;
+    } else if (ccerr->type == NGTCP2_CCERR_TYPE_DROP_CONN) {
+        type = NET_QUIC_CLOSE_INFO_DROP;
+    }
+
+    net_quic_set_close_info(
+        ep,
+        type,
+        NET_QUIC_CLOSE_INITIATOR_PEER,
+        ccerr->error_code,
+        ccerr->frame_type,
+        0
+    );
+}
+
+static void
+net_quic_capture_local_failure(net_quic_connection *ep, int rv)
+{
+    uint8_t alert;
+
+    if (rv == NGTCP2_ERR_CRYPTO) {
+        alert = ngtcp2_conn_get_tls_alert(ep->conn);
+        net_quic_set_close_info(
+            ep,
+            net_quic_tls_alert_is_certificate(alert)
+                ? NET_QUIC_CLOSE_INFO_CERTIFICATE
+                : NET_QUIC_CLOSE_INFO_TLS,
+            NET_QUIC_CLOSE_INITIATOR_LOCAL,
+            (uint64_t)alert,
+            0,
+            rv
+        );
+        return;
+    }
+
+    if (rv == NGTCP2_ERR_HANDSHAKE_TIMEOUT) {
+        net_quic_set_close_info(
+            ep,
+            NET_QUIC_CLOSE_INFO_HANDSHAKE,
+            NET_QUIC_CLOSE_INITIATOR_LOCAL,
+            0,
+            0,
+            rv
+        );
+        return;
+    }
+
+    net_quic_set_close_info(
+        ep,
+        NET_QUIC_CLOSE_INFO_TRANSPORT,
+        NET_QUIC_CLOSE_INITIATOR_LOCAL,
+        ngtcp2_err_infer_quic_transport_error_code(rv),
+        0,
+        rv
+    );
 }
 
 static ngtcp2_tstamp

@@ -1370,8 +1370,13 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
             croak("ngtcp2_conn_read_pkt failed: %s", ngtcp2_strerror(rv));
         } else if (rv != 0) {
             net_quic_capture_local_failure(ep, rv);
-            ep->retired = 1;
-            ep->close_wait = 0;
+            rv = net_quic_start_error_close(ep, rv, now);
+            if (rv != 0) {
+                croak(
+                    "unable to send QUIC failure close: %s",
+                    ngtcp2_strerror(rv)
+                );
+            }
         }
 
         net_quic_stream_reclaim_closed(aTHX_ ep);
@@ -1462,7 +1467,13 @@ _handle_timeout(self)
             croak("ngtcp2_conn_handle_expiry failed: %s", ngtcp2_strerror(rv));
         } else if (rv != 0) {
             net_quic_capture_local_failure(ep, rv);
-            ep->retired = 1;
+            rv = net_quic_start_error_close(ep, rv, now);
+            if (rv != 0) {
+                croak(
+                    "unable to send QUIC failure close: %s",
+                    ngtcp2_strerror(rv)
+                );
+            }
         } else if (ngtcp2_conn_in_closing_period2(ep->conn) ||
                    ngtcp2_conn_in_draining_period2(ep->conn)) {
             net_quic_capture_peer_close(ep);

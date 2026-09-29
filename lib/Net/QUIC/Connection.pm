@@ -3,10 +3,35 @@ package Net::QUIC::Connection;
 use strict;
 use warnings;
 
+use Hash::Util::FieldHash qw(fieldhash);
+
 use Net::QUIC ();
 use Net::QUIC::Stream ();
 
 our $VERSION = $Net::QUIC::VERSION;
+
+fieldhash my %OUTPUT_CALLBACK;
+
+sub _set_output_callback {
+    my ($self, $callback) = @_;
+
+    if (defined $callback) {
+        die "output callback must be a coderef"
+            if ref($callback) ne 'CODE';
+        $OUTPUT_CALLBACK{$self} = $callback;
+    } else {
+        delete $OUTPUT_CALLBACK{$self};
+    }
+
+    return;
+}
+
+sub _notify_output {
+    my ($self) = @_;
+    my $callback = $OUTPUT_CALLBACK{$self};
+    $callback->() if $callback;
+    return;
+}
 
 sub open_bidi_stream {
     my ($self) = @_;
@@ -40,6 +65,7 @@ sub close {
         if $application_error_code !~ /\A\d+\z/;
 
     $self->_close($application_error_code);
+    $self->_notify_output;
     return;
 }
 

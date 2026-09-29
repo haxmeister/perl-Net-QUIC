@@ -501,7 +501,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
         callbacks.acked_stream_data_offset = net_quic_acked_stream_data_offset_cb;
         callbacks.stream_open = net_quic_stream_open_cb;
-        callbacks.stream_close = net_quic_stream_close_cb;
+        callbacks.stream_close = net_quic_stream_close_limit_cb;
         callbacks.stream_reset = net_quic_stream_reset_cb;
         callbacks.extend_max_local_streams_bidi =
             net_quic_extend_max_local_streams_bidi_cb;

@@ -636,6 +636,20 @@ _open_bidi_stream(self)
     OUTPUT:
         RETVAL
 
+UV
+_take_stream_available(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        unsigned int events;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        events = ep->stream_available_events;
+        ep->stream_available_events = 0;
+        RETVAL = (UV)events;
+    OUTPUT:
+        RETVAL
+
 SV *
 _next_stream_id(self)
     SV *self

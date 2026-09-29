@@ -414,7 +414,8 @@ subtest 'staggered multi-connection retirement' => sub {
         }
 
         last if !grep { !defined $_ } @server_for
-            && !grep { !$_->closed } @client_streams;
+            && !grep { !$_->closed } @client_streams
+            && !grep { !$_->closed } values %server_stream_for;
     }
 
     ok(!grep { !defined $_ } @server_for, 'server Connections are matched to their clients');

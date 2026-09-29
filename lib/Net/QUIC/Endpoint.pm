@@ -459,6 +459,42 @@ a PEM file to the default trust store:
 
 Net::QUIC does not provide an insecure skip-verification switch.
 
+Both client and server accept an optional C<transport> hash:
+
+    transport => {
+        handshake_timeout => 10,
+        idle_timeout      => 30,
+        connection_window => 1024 * 1024,
+        stream_window     => 256 * 1024,
+        max_bidi_streams  => 100,
+        max_uni_streams   => 100,
+    }
+
+These are the Net::QUIC defaults.
+
+C<handshake_timeout> and C<idle_timeout> are in seconds. Fractional seconds are
+accepted to millisecond precision. C<handshake_timeout> must be greater than
+zero. C<idle_timeout =E<gt> 0> disables the advertised idle timeout.
+
+C<connection_window> is the initial connection-level receive flow-control
+credit in bytes. C<stream_window> is the initial per-stream receive credit and
+is used for bidirectional and unidirectional streams. Net::QUIC returns receive
+credit as the application consumes data, so these are starting windows rather
+than lifetime byte limits.
+
+C<max_bidi_streams> and C<max_uni_streams> are the initial numbers of concurrent
+peer-initiated streams allowed. Closed peer streams return stream credit, so
+the values do not limit how many streams may exist over the life of a
+connection.
+
+Net::QUIC currently advertises active migration as disabled. Migration is not
+exposed as a tuning option until the library implements and tests migration
+semantics.
+
+ACK timing, congestion control, packet sizing, PMTU behavior, and connection ID
+management remain ngtcp2/Net::QUIC policy rather than public knobs at this
+stage.
+
 =head2 server
 
     my $endpoint = Net::QUIC::Endpoint->server(

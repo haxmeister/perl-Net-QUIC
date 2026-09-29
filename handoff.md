@@ -2,39 +2,71 @@
 
 ## Current branch
 
-feature/fixed-size-transmit-chunks
+feature/integration-driver
 
 Current main baseline:
 
-28e550af11df8ad0a0f39d58e4aa1ae53e5f80da
+0e17aefd8df2bee6660d3faac83eca6eef597ff6
 
-Previous completed work:
+PR:
 
-- feature/stateless-reset was merged to main through PR #2
-- validated Stateless Reset checkpoint: c691bf69fd3e01665ca1630472edcb6e37c9069d
-- validated full matrix: GitHub Actions run 36499381840, 15/15 PASS
-- merged main commit: a35acccff0fe410e6915860ea1a0cc682fbb895f
+- #5 Add generic event-loop integration driver
 
-Previous completed work:
+Validated code-bearing checkpoint:
 
-- feature/stream-state-reclamation was merged to main through PR #3
-- validated code-bearing checkpoint: 189412c00bd71550f8cdf1ec094ea939fcc2a0ad
-- validated full matrix: GitHub Actions run 36501080050, 15/15 PASS
-- merged main commit: 28e550af11df8ad0a0f39d58e4aa1ae53e5f80da
+- head: fec6ce358ac43695a690e7ba05dd46faf8e4cf3c
+- GitHub Actions run: 36508276514
+- full 15-job matrix: PASS
+- 15 test files / 249 tests on Linux Perl 5.44
+- Linux Perl 5.20 through 5.44: PASS
+- macOS Perl 5.44: PASS
+- Windows Perl 5.44: PASS
 
 Immediate branch scope is complete:
 
-- large application send buffers are split into fixed 16 KiB native transmit
-  chunks
-- fully acknowledged leading chunks are freed before the entire original send
-  call has been acknowledged
-- chunk construction is atomic, so allocation failure cannot queue a partial
-  application send
-- byte ordering, FIN placement, retransmission safety, and immutable byte
-  lifetime are preserved
-- the existing public Stream->send API and event-loop boundary are unchanged
-- transmit fairness and stream scheduling semantics are unchanged
-- no public chunk-size tuning knob was added
+- add Net::QUIC::Driver as the recommended event-loop adapter boundary
+- keep Net::QUIC::Endpoint as the low-level engine boundary
+- ordinary adapters report start, receive, timeout, and writable events
+- ordinary adapters provide send and set_timeout callbacks
+- Driver owns Endpoint output draining
+- Driver owns UDP backpressure pause/resume state
+- Driver refreshes or cancels the one-shot QUIC timeout after state changes
+- Driver automatically services application output from Connections obtained
+  through it
+- Stream send, finish, reset, and received-data consumption notify the Driver
+  after changing QUIC state
+- Connection close notifies the Driver after changing QUIC state
+- low-level Endpoint users remain unaffected
+- no event-loop dependency was added to Net::QUIC
+- no Linux::Event, IO::Async, EV, or other adapter was added to this
+  distribution
+
+The design goal is now explicit:
+
+    An adapter author should understand their event loop, not ngtcp2's
+    servicing rules.
+
+The recommended adapter contract is:
+
+    $driver->start;
+    $driver->receive($bytes, $local, $peer);
+    $driver->timeout;
+    $driver->writable;
+
+with:
+
+    send        => sub { ... }
+    set_timeout => sub { ... }
+
+The low-level Endpoint contract remains available:
+
+    receive_datagram
+    next_datagram
+    timeout_after
+    handle_timeout
+
+This branch deliberately does not add a framework-specific adapter. Linux::Event,
+IO::Async, EV, and other integrations can all sit above the same Driver API.
 
 ## Purpose
 
@@ -74,23 +106,29 @@ The public object split is now:
 Endpoint is the UDP/event-loop boundary. Connection is one QUIC connection and
 Stream is one application-facing QUIC byte stream.
 
-The integration contract is now concrete:
+The recommended integration contract is now Net::QUIC::Driver:
 
-    $endpoint->receive_datagram($bytes, $local, $peer);
+    $driver->start;
+    $driver->receive($bytes, $local, $peer);
+    $driver->timeout;
+    $driver->writable;
 
-    while (my $datagram = $endpoint->next_datagram) {
-        # send $datagram->data to $datagram->peer
-    }
+The adapter provides only:
 
-    my $seconds = $endpoint->timeout_after;
+    send        => sub { ... }
+    set_timeout => sub { ... }
 
-    $endpoint->handle_timeout;
+Driver owns the repetitive Endpoint service cycle. Endpoint still exposes its
+four primitive methods for tests and unusual low-level integrations:
 
-After receive_datagram or handle_timeout, the adapter drains next_datagram and
-then rearms its timer from timeout_after.
+    receive_datagram
+    next_datagram
+    timeout_after
+    handle_timeout
 
-This is the intended boundary for Linux::Event, IO::Async, EV, AnyEvent, and
-other event systems.
+Linux::Event, IO::Async, EV, AnyEvent, and other event systems can all map their
+UDP receive, writable/backpressure, and one-shot timer facilities to the same
+Driver contract.
 
 ## Current public/native slice
 
@@ -600,9 +638,12 @@ Focused tests prove:
 
 Next:
 
-1. Write a small Linux::Event adapter now that the raw Endpoint contract is
-   stable.
-2. Keep HTTP/3 out of this transport layer for now.
+1. Review PR #5 and merge the Driver work only with explicit user approval.
+2. If framework adapters are pursued, keep them above the event-loop-neutral
+   Driver boundary rather than teaching Net::QUIC core about a specific loop.
+3. Do not add adapters to this distribution merely because examples exist;
+   placement remains an explicit project decision.
+4. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

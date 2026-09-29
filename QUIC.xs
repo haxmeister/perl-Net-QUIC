@@ -1,5 +1,25 @@
 #include "xs/net_quic_connection.h"
 
+static int
+net_quic_stream_close_limit_cb(
+    ngtcp2_conn *conn,
+    uint32_t flags,
+    int64_t stream_id,
+    uint64_t app_error_code,
+    void *user_data,
+    void *stream_user_data
+)
+{
+    return net_quic_stream_close_cb(
+        conn,
+        flags,
+        stream_id,
+        app_error_code,
+        user_data,
+        stream_user_data
+    );
+}
+
 static net_quic_server_tls *
 net_quic_server_tls_from_sv(SV *self)
 {

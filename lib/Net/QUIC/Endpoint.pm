@@ -165,6 +165,7 @@ sub _server_receive_datagram {
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
+        $connection->_dispatch_stream_availability;
 
         $self->{routes}{$initial_dcid} = $connection;
         push @{$self->{connections}}, $connection;

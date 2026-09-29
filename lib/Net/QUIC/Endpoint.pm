@@ -176,6 +176,7 @@ sub _server_receive_datagram {
     }
 
     $connection->_receive_datagram($bytes, $local, $peer);
+    $connection->_dispatch_stream_availability;
     $self->_sync_server_routes($connection);
     $self->_retire_server_connections;
     return;

@@ -73,6 +73,12 @@ net_quic_start_error_close(
         &ccerr,
         now
     );
+    if (nwrite == NGTCP2_ERR_INVALID_STATE) {
+        ep->retired = 1;
+        ep->close_wait = 0;
+        return 0;
+    }
+
     if (nwrite < 0) {
         return (int)nwrite;
     }
@@ -97,6 +103,100 @@ net_quic_start_error_close(
 
     net_quic_start_close_wait(ep, now);
     return 0;
+}
+
+static UV
+net_quic_transport_value(AV *av, SSize_t index)
+{
+    SV **svp = av_fetch(av, index, 0);
+
+    if (svp == NULL || !SvOK(*svp)) {
+        croak("invalid internal transport configuration");
+    }
+
+    return SvUV(*svp);
+}
+
+static void
+net_quic_apply_transport_config(
+    ngtcp2_settings *settings,
+    ngtcp2_transport_params *params,
+    SV *transport_sv
+)
+{
+    AV *av;
+    UV handshake_ms;
+    UV idle_ms;
+    UV connection_window;
+    UV stream_window;
+    UV max_bidi_streams;
+    UV max_uni_streams;
+
+    if (!SvOK(transport_sv)) {
+        settings->handshake_timeout = 10 * NGTCP2_SECONDS;
+        params->max_idle_timeout = 30 * NGTCP2_SECONDS;
+        params->initial_max_stream_data_bidi_local = 256 * 1024;
+        params->initial_max_stream_data_bidi_remote = 256 * 1024;
+        params->initial_max_stream_data_uni = 256 * 1024;
+        params->initial_max_data = 1024 * 1024;
+        params->initial_max_streams_bidi = 100;
+        params->initial_max_streams_uni = 100;
+        params->active_connection_id_limit = 4;
+        params->disable_active_migration = 1;
+        return;
+    }
+
+    if (!SvROK(transport_sv) ||
+        SvTYPE(SvRV(transport_sv)) != SVt_PVAV) {
+        croak("invalid internal transport configuration");
+    }
+
+    av = (AV *)SvRV(transport_sv);
+    if (av_len(av) != 5) {
+        croak("invalid internal transport configuration");
+    }
+
+    handshake_ms = net_quic_transport_value(av, 0);
+    idle_ms = net_quic_transport_value(av, 1);
+    connection_window = net_quic_transport_value(av, 2);
+    stream_window = net_quic_transport_value(av, 3);
+    max_bidi_streams = net_quic_transport_value(av, 4);
+    max_uni_streams = net_quic_transport_value(av, 5);
+
+    if (handshake_ms == 0 ||
+        handshake_ms > UINT64_MAX / NGTCP2_MILLISECONDS) {
+        croak("handshake_timeout is outside the supported range");
+    }
+    if (idle_ms > NGTCP2_MAX_VARINT ||
+        idle_ms > UINT64_MAX / NGTCP2_MILLISECONDS) {
+        croak("idle_timeout is outside the supported range");
+    }
+    if (connection_window > NGTCP2_MAX_VARINT) {
+        croak("connection_window is outside the supported range");
+    }
+    if (stream_window > NGTCP2_MAX_VARINT) {
+        croak("stream_window is outside the supported range");
+    }
+    if (max_bidi_streams > NGTCP2_MAX_VARINT) {
+        croak("max_bidi_streams is outside the supported range");
+    }
+    if (max_uni_streams > NGTCP2_MAX_VARINT) {
+        croak("max_uni_streams is outside the supported range");
+    }
+
+    settings->handshake_timeout =
+        (ngtcp2_duration)handshake_ms * NGTCP2_MILLISECONDS;
+
+    params->max_idle_timeout =
+        (ngtcp2_duration)idle_ms * NGTCP2_MILLISECONDS;
+    params->initial_max_stream_data_bidi_local = stream_window;
+    params->initial_max_stream_data_bidi_remote = stream_window;
+    params->initial_max_stream_data_uni = stream_window;
+    params->initial_max_data = connection_window;
+    params->initial_max_streams_bidi = max_bidi_streams;
+    params->initial_max_streams_uni = max_uni_streams;
+    params->active_connection_id_limit = 4;
+    params->disable_active_migration = 1;
 }
 
 static net_quic_server_tls *
@@ -250,13 +350,14 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef)
     const char *class
     SV *local_sv
     SV *peer_sv
     SV *alpn_sv
     SV *server_name_sv
     SV *ca_file_sv
+    SV *transport_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -375,13 +476,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
         settings.initial_ts = net_quic_now();
 
         ngtcp2_transport_params_default(&params);
-        params.initial_max_stream_data_bidi_local = 256 * 1024;
-        params.initial_max_stream_data_bidi_remote = 256 * 1024;
-        params.initial_max_stream_data_uni = 256 * 1024;
-        params.initial_max_data = 1024 * 1024;
-        params.initial_max_streams_bidi = 100;
-        params.initial_max_streams_uni = 100;
-        params.active_connection_id_limit = 4;
+        net_quic_apply_transport_config(&settings, &params, transport_sv);
 
         memset(&path, 0, sizeof(path));
         path.local.addr = &ep->local_addr.sa;
@@ -416,7 +511,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -425,6 +520,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *server_tls_sv
     SV *odcid_sv
     SV *server_secret_sv
+    SV *transport_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -604,13 +700,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         }
 
         ngtcp2_transport_params_default(&params);
-        params.initial_max_stream_data_bidi_local = 256 * 1024;
-        params.initial_max_stream_data_bidi_remote = 256 * 1024;
-        params.initial_max_stream_data_uni = 256 * 1024;
-        params.initial_max_data = 1024 * 1024;
-        params.initial_max_streams_bidi = 100;
-        params.initial_max_streams_uni = 100;
-        params.active_connection_id_limit = 4;
+        net_quic_apply_transport_config(&settings, &params, transport_sv);
         params.stateless_reset_token_present = 1;
 
         rv = ngtcp2_crypto_generate_stateless_reset_token(
@@ -1658,6 +1748,86 @@ _retired(self)
     CODE:
         ep = net_quic_connection_from_sv(self);
         RETVAL = ep->retired ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+SV *
+_transport_info(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        const ngtcp2_transport_params *params;
+        HV *hv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        params = ngtcp2_conn_get_local_transport_params(ep->conn);
+
+        hv = newHV();
+        hv_store(
+            hv,
+            "idle_timeout_ms",
+            15,
+            newSVuv((UV)(params->max_idle_timeout / NGTCP2_MILLISECONDS)),
+            0
+        );
+        hv_store(
+            hv,
+            "connection_window",
+            17,
+            newSVuv((UV)params->initial_max_data),
+            0
+        );
+        hv_store(
+            hv,
+            "stream_window_bidi_local",
+            24,
+            newSVuv((UV)params->initial_max_stream_data_bidi_local),
+            0
+        );
+        hv_store(
+            hv,
+            "stream_window_bidi_remote",
+            25,
+            newSVuv((UV)params->initial_max_stream_data_bidi_remote),
+            0
+        );
+        hv_store(
+            hv,
+            "stream_window_uni",
+            17,
+            newSVuv((UV)params->initial_max_stream_data_uni),
+            0
+        );
+        hv_store(
+            hv,
+            "max_bidi_streams",
+            16,
+            newSVuv((UV)params->initial_max_streams_bidi),
+            0
+        );
+        hv_store(
+            hv,
+            "max_uni_streams",
+            15,
+            newSVuv((UV)params->initial_max_streams_uni),
+            0
+        );
+        hv_store(
+            hv,
+            "active_connection_id_limit",
+            26,
+            newSVuv((UV)params->active_connection_id_limit),
+            0
+        );
+        hv_store(
+            hv,
+            "disable_active_migration",
+            24,
+            newSViv(params->disable_active_migration ? 1 : 0),
+            0
+        );
+
+        RETVAL = newRV_noinc((SV *)hv);
     OUTPUT:
         RETVAL
 

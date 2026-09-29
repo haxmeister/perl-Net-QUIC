@@ -22,17 +22,19 @@ Previous completed work:
 - validated full matrix: GitHub Actions run 36501080050, 15/15 PASS
 - merged main commit: 28e550af11df8ad0a0f39d58e4aa1ae53e5f80da
 
-Immediate branch scope:
+Immediate branch scope is complete:
 
-- split large application send buffers into fixed-size native transmit chunks
-- allow fully acknowledged chunks to be freed before the entire original send
+- large application send buffers are split into fixed 16 KiB native transmit
+  chunks
+- fully acknowledged leading chunks are freed before the entire original send
   call has been acknowledged
-- preserve byte ordering, FIN placement, retransmission safety, and immutable
-  bytes until acknowledgement or stream close
-- preserve the existing public Stream->send API and event-loop boundary
-- avoid changing transmit fairness or stream scheduling semantics
-- choose chunk sizing based on memory behavior and packetization needs rather
-  than exposing a new public tuning knob unless evidence justifies one
+- chunk construction is atomic, so allocation failure cannot queue a partial
+  application send
+- byte ordering, FIN placement, retransmission safety, and immutable byte
+  lifetime are preserved
+- the existing public Stream->send API and event-loop boundary are unchanged
+- transmit fairness and stream scheduling semantics are unchanged
+- no public chunk-size tuning knob was added
 
 ## Purpose
 
@@ -229,11 +231,14 @@ soon as neither owner remains. If the application drops a Stream before QUIC
 close, the still-active native state remains until ngtcp2 later closes it and is
 then reclaimed automatically.
 
-One stream memory improvement remains before calling this area finished:
+The remaining stream transmit-memory improvement is now implemented. Large
+send calls are stored as fixed 16 KiB native chunks. ngtcp2's ordered stream
+ACK callback allows fully acknowledged leading chunks to be freed
+independently, while later unacknowledged chunks remain immutable for
+retransmission safety.
 
-- One large send call is one immutable transmit allocation, so partially
-  acknowledged data cannot release part of that allocation. Fixed-size transmit
-  chunks can improve memory release later without changing the public API.
+The public Stream->send API is unchanged and there is no public chunk-size
+setting.
 
 ## Windows portability findings
 
@@ -549,12 +554,55 @@ Focused tests prove:
 - the later close callback reclaims that unowned native stream automatically
 - native stream counts return to zero after ownership is gone
 
+Fixed-size transmit chunking is now implemented on
+feature/fixed-size-transmit-chunks.
+
+Code-bearing checkpoint:
+
+- head: 3aa52a3c05742e2df7150c5baf406b8726ff8690
+- draft PR: #4
+- GitHub Actions run: 36503056226
+- full 15-job matrix: PASS
+- 14 test files / 220 tests
+- Linux Perl 5.20 through 5.44: PASS
+- macOS: PASS
+- Windows: PASS
+
+Transmit behavior now is:
+
+- Stream->send remains one public call regardless of internal chunking
+- each send larger than 16 KiB is copied into a temporary linked list of
+  fixed-size chunks plus one smaller final chunk when needed
+- that temporary list is attached to the stream only after every allocation
+  succeeds, so allocation failure leaves the stream queue unchanged
+- each chunk has its own absolute stream offset
+- ngtcp2 still receives immutable bytes and keeps them valid until ACK or
+  stream close
+- acknowledged leading chunks are freed as soon as the ordered ACK callback
+  says their complete byte range is safe to release
+- later chunks remain buffered and immutable
+- finish marks only the final data chunk with FIN when possible; otherwise the
+  existing zero-length FIN chunk path is used
+- round-robin stream scheduling is unchanged
+- no public API change was required
+
+Focused tests prove:
+
+- a 384 KiB+ send is split into 25 chunks
+- partial ACK progress releases early chunks while later chunks are still
+  buffered
+- retained transmit byte count falls before the original send is fully
+  acknowledged
+- exact payload contents and ordering are preserved
+- all data chunks are eventually released while the stream is still open
+- FIN still follows the correct final byte offset
+- normal stream close still works on both endpoints
+
 Next:
 
-1. Implement and validate fixed-size transmit chunks for earlier ACK memory
-   release.
-2. Write a small Linux::Event adapter after the raw contract is stable.
-3. Keep HTTP/3 out of this transport layer for now.
+1. Write a small Linux::Event adapter now that the raw Endpoint contract is
+   stable.
+2. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

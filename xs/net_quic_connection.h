@@ -82,6 +82,9 @@ struct net_quic_connection {
     SV *server_tls_owner;
     int ready;
     int is_server;
+    int local_bidi_stream_waiting;
+    int local_uni_stream_waiting;
+    unsigned int stream_available_events;
     uint8_t server_secret[NET_QUIC_SERVER_SECRET_LEN];
     int retired;
     int close_wait;

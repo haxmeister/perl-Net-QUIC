@@ -575,7 +575,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     OUTPUT:
         RETVAL
 
-IV
+SV *
 _open_stream(self, bidirectional)
     SV *self
     int bidirectional
@@ -595,14 +595,16 @@ _open_stream(self, bidirectional)
             bidirectional ? 1 : 0,
             &stream_id
         );
-        if (rv != 0) {
+        if (rv == NGTCP2_ERR_STREAM_ID_BLOCKED) {
+            RETVAL = &PL_sv_undef;
+        } else if (rv != 0) {
             croak(
                 "unable to open QUIC stream: %s",
                 ngtcp2_strerror(rv)
             );
+        } else {
+            RETVAL = newSViv((IV)stream_id);
         }
-
-        RETVAL = (IV)stream_id;
     OUTPUT:
         RETVAL
 

@@ -73,6 +73,12 @@ net_quic_start_error_close(
         &ccerr,
         now
     );
+    if (nwrite == NGTCP2_ERR_INVALID_STATE) {
+        ep->retired = 1;
+        ep->close_wait = 0;
+        return 0;
+    }
+
     if (nwrite < 0) {
         return (int)nwrite;
     }

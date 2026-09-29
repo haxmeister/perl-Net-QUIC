@@ -266,7 +266,9 @@ sub receive_datagram {
     return $self->_server_receive_datagram(@args)
         if $self->{mode} eq 'server';
 
-    return $self->{connection}->_receive_datagram(@args);
+    $self->{connection}->_receive_datagram(@args);
+    $self->{connection}->_dispatch_stream_availability;
+    return;
 }
 
 sub next_datagram {

@@ -608,7 +608,7 @@ _open_stream(self, bidirectional)
     OUTPUT:
         RETVAL
 
-IV
+SV *
 _open_bidi_stream(self)
     SV *self
     PREINIT:
@@ -623,14 +623,16 @@ _open_bidi_stream(self)
         }
 
         rv = net_quic_stream_open_local(aTHX_ ep, 1, &stream_id);
-        if (rv != 0) {
+        if (rv == NGTCP2_ERR_STREAM_ID_BLOCKED) {
+            RETVAL = &PL_sv_undef;
+        } else if (rv != 0) {
             croak(
                 "unable to open QUIC stream: %s",
                 ngtcp2_strerror(rv)
             );
+        } else {
+            RETVAL = newSViv((IV)stream_id);
         }
-
-        RETVAL = (IV)stream_id;
     OUTPUT:
         RETVAL
 

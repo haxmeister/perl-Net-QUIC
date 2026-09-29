@@ -150,10 +150,13 @@ subtest 'object destruction order' => sub {
     undef $connection;
     ok(defined($weak_connection), 'Stream strongly retains its Connection');
 
-    lives {
-        $stream->send("survives-owner-drop\n");
-        $stream->finish;
-    } 'Stream remains safe after Driver and Endpoint are gone';
+    ok(
+        !dies {
+            $stream->send("survives-owner-drop\n");
+            $stream->finish;
+        },
+        'Stream remains safe after Driver and Endpoint are gone',
+    );
 
     undef $stream;
     ok(!defined($weak_connection), 'dropping final Stream releases remaining Connection');

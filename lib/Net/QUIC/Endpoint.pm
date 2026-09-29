@@ -165,6 +165,7 @@ sub _server_receive_datagram {
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
+        $connection->_dispatch_stream_availability;
 
         $self->{routes}{$initial_dcid} = $connection;
         push @{$self->{connections}}, $connection;
@@ -175,6 +176,7 @@ sub _server_receive_datagram {
     }
 
     $connection->_receive_datagram($bytes, $local, $peer);
+    $connection->_dispatch_stream_availability;
     $self->_sync_server_routes($connection);
     $self->_retire_server_connections;
     return;
@@ -264,7 +266,9 @@ sub receive_datagram {
     return $self->_server_receive_datagram(@args)
         if $self->{mode} eq 'server';
 
-    return $self->{connection}->_receive_datagram(@args);
+    $self->{connection}->_receive_datagram(@args);
+    $self->{connection}->_dispatch_stream_availability;
+    return;
 }
 
 sub next_datagram {

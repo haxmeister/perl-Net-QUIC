@@ -1,5 +1,41 @@
 #include "xs/net_quic_connection.h"
 
+static int
+net_quic_stream_close_limit_cb(
+    ngtcp2_conn *conn,
+    uint32_t flags,
+    int64_t stream_id,
+    uint64_t app_error_code,
+    void *user_data,
+    void *stream_user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    int rv;
+
+    rv = net_quic_stream_close_cb(
+        conn,
+        flags,
+        stream_id,
+        app_error_code,
+        user_data,
+        stream_user_data
+    );
+    if (rv != 0) {
+        return rv;
+    }
+
+    if (!net_quic_stream_id_is_local(ep, stream_id)) {
+        if (net_quic_stream_id_is_bidirectional(stream_id)) {
+            ngtcp2_conn_extend_max_streams_bidi(conn, 1);
+        } else {
+            ngtcp2_conn_extend_max_streams_uni(conn, 1);
+        }
+    }
+
+    return 0;
+}
+
 static net_quic_server_tls *
 net_quic_server_tls_from_sv(SV *self)
 {
@@ -246,8 +282,12 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
         callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
         callbacks.acked_stream_data_offset = net_quic_acked_stream_data_offset_cb;
         callbacks.stream_open = net_quic_stream_open_cb;
-        callbacks.stream_close = net_quic_stream_close_cb;
+        callbacks.stream_close = net_quic_stream_close_limit_cb;
         callbacks.stream_reset = net_quic_stream_reset_cb;
+        callbacks.extend_max_local_streams_bidi =
+            net_quic_extend_max_local_streams_bidi_cb;
+        callbacks.extend_max_local_streams_uni =
+            net_quic_extend_max_local_streams_uni_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
@@ -461,8 +501,12 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         callbacks.recv_stream_data = net_quic_recv_stream_data_cb;
         callbacks.acked_stream_data_offset = net_quic_acked_stream_data_offset_cb;
         callbacks.stream_open = net_quic_stream_open_cb;
-        callbacks.stream_close = net_quic_stream_close_cb;
+        callbacks.stream_close = net_quic_stream_close_limit_cb;
         callbacks.stream_reset = net_quic_stream_reset_cb;
+        callbacks.extend_max_local_streams_bidi =
+            net_quic_extend_max_local_streams_bidi_cb;
+        callbacks.extend_max_local_streams_uni =
+            net_quic_extend_max_local_streams_uni_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
@@ -567,7 +611,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     OUTPUT:
         RETVAL
 
-IV
+SV *
 _open_stream(self, bidirectional)
     SV *self
     int bidirectional
@@ -587,18 +631,25 @@ _open_stream(self, bidirectional)
             bidirectional ? 1 : 0,
             &stream_id
         );
-        if (rv != 0) {
+        if (rv == NGTCP2_ERR_STREAM_ID_BLOCKED) {
+            if (bidirectional) {
+                ep->local_bidi_stream_waiting = 1;
+            } else {
+                ep->local_uni_stream_waiting = 1;
+            }
+            RETVAL = &PL_sv_undef;
+        } else if (rv != 0) {
             croak(
                 "unable to open QUIC stream: %s",
                 ngtcp2_strerror(rv)
             );
+        } else {
+            RETVAL = newSViv((IV)stream_id);
         }
-
-        RETVAL = (IV)stream_id;
     OUTPUT:
         RETVAL
 
-IV
+SV *
 _open_bidi_stream(self)
     SV *self
     PREINIT:
@@ -613,14 +664,30 @@ _open_bidi_stream(self)
         }
 
         rv = net_quic_stream_open_local(aTHX_ ep, 1, &stream_id);
-        if (rv != 0) {
+        if (rv == NGTCP2_ERR_STREAM_ID_BLOCKED) {
+            RETVAL = &PL_sv_undef;
+        } else if (rv != 0) {
             croak(
                 "unable to open QUIC stream: %s",
                 ngtcp2_strerror(rv)
             );
+        } else {
+            RETVAL = newSViv((IV)stream_id);
         }
+    OUTPUT:
+        RETVAL
 
-        RETVAL = (IV)stream_id;
+UV
+_take_stream_available(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        unsigned int events;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        events = ep->stream_available_events;
+        ep->stream_available_events = 0;
+        RETVAL = (UV)events;
     OUTPUT:
         RETVAL
 

@@ -67,6 +67,9 @@ struct net_quic_cid_event {
     net_quic_cid_event *next;
 };
 
+#define NET_QUIC_STREAM_AVAILABLE_BIDI 0x01u
+#define NET_QUIC_STREAM_AVAILABLE_UNI  0x02u
+
 struct net_quic_connection {
     ngtcp2_conn *conn;
     ngtcp2_crypto_conn_ref conn_ref;
@@ -82,6 +85,9 @@ struct net_quic_connection {
     SV *server_tls_owner;
     int ready;
     int is_server;
+    int local_bidi_stream_waiting;
+    int local_uni_stream_waiting;
+    unsigned int stream_available_events;
     uint8_t server_secret[NET_QUIC_SERVER_SECRET_LEN];
     int retired;
     int close_wait;
@@ -112,6 +118,46 @@ struct net_quic_connection {
     ptls_openssl_verify_certificate_t picotls_verify_cert;
     int picotls_verify_cert_ready;
 };
+
+static int
+net_quic_extend_max_local_streams_bidi_cb(
+    ngtcp2_conn *conn,
+    uint64_t max_streams,
+    void *user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+
+    (void)conn;
+    (void)max_streams;
+
+    if (ep->local_bidi_stream_waiting) {
+        ep->local_bidi_stream_waiting = 0;
+        ep->stream_available_events |= NET_QUIC_STREAM_AVAILABLE_BIDI;
+    }
+
+    return 0;
+}
+
+static int
+net_quic_extend_max_local_streams_uni_cb(
+    ngtcp2_conn *conn,
+    uint64_t max_streams,
+    void *user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+
+    (void)conn;
+    (void)max_streams;
+
+    if (ep->local_uni_stream_waiting) {
+        ep->local_uni_stream_waiting = 0;
+        ep->stream_available_events |= NET_QUIC_STREAM_AVAILABLE_UNI;
+    }
+
+    return 0;
+}
 
 static ngtcp2_tstamp
 net_quic_system_now(void)

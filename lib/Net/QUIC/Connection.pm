@@ -11,6 +11,7 @@ use Net::QUIC::Stream ();
 our $VERSION = $Net::QUIC::VERSION;
 
 fieldhash my %OUTPUT_CALLBACK;
+fieldhash my %STREAM_AVAILABLE_CALLBACK;
 
 sub _set_output_callback {
     my ($self, $callback) = @_;
@@ -33,15 +34,44 @@ sub _notify_output {
     return;
 }
 
+sub on_stream_available {
+    my ($self, $callback) = @_;
+
+    if (defined $callback) {
+        die "stream availability callback must be a coderef"
+            if ref($callback) ne 'CODE';
+        $STREAM_AVAILABLE_CALLBACK{$self} = $callback;
+    } else {
+        delete $STREAM_AVAILABLE_CALLBACK{$self};
+    }
+
+    $self->_dispatch_stream_availability;
+    return $self;
+}
+
+sub _dispatch_stream_availability {
+    my ($self) = @_;
+
+    my $callback = $STREAM_AVAILABLE_CALLBACK{$self};
+    return if !$callback;
+
+    my $events = $self->_take_stream_available;
+    $callback->($self, 'bidi') if $events & 0x01;
+    $callback->($self, 'uni')  if $events & 0x02;
+    return;
+}
+
 sub open_bidi_stream {
     my ($self) = @_;
     my $id = $self->_open_stream(1);
+    return if !defined $id;
     return Net::QUIC::Stream->_new($self, $id, 1, 1);
 }
 
 sub open_uni_stream {
     my ($self) = @_;
     my $id = $self->_open_stream(0);
+    return if !defined $id;
     return Net::QUIC::Stream->_new($self, $id, 1, 0);
 }
 
@@ -102,12 +132,41 @@ still being built.
 
 Opens a bidirectional stream and returns a L<Net::QUIC::Stream>.
 
+Returns undef when the peer's current bidirectional stream limit has been
+reached. This is normal QUIC flow control and does not mean the Connection has
+failed. Other failures still throw an exception.
+
 =head2 open_uni_stream
 
     my $stream = $connection->open_uni_stream;
 
 Opens a local unidirectional stream. This side can send on the stream, but it
 does not receive application data on it.
+
+Returns undef when the peer's current unidirectional stream limit has been
+reached. Other failures still throw an exception.
+
+=head2 on_stream_available
+
+    $connection->on_stream_available(sub {
+        my ($connection, $type) = @_;
+
+        if ($type eq 'bidi') {
+            my $stream = $connection->open_bidi_stream;
+            ...
+        }
+    });
+
+Registers a callback for stream-limit recovery.
+
+The callback is useful after C<open_bidi_stream> or C<open_uni_stream> returns
+undef. It runs when the peer later raises that stream limit, and C<$type> is
+either C<bidi> or C<uni>.
+
+The callback runs outside ngtcp2's internal callback stack, so opening a stream
+from it is safe.
+
+Pass undef to remove the callback.
 
 =head2 next_stream
 

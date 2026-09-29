@@ -126,6 +126,20 @@ net_quic_apply_transport_config(
     UV max_bidi_streams;
     UV max_uni_streams;
 
+    if (!SvOK(transport_sv)) {
+        settings->handshake_timeout = 10 * NGTCP2_SECONDS;
+        params->max_idle_timeout = 30 * NGTCP2_SECONDS;
+        params->initial_max_stream_data_bidi_local = 256 * 1024;
+        params->initial_max_stream_data_bidi_remote = 256 * 1024;
+        params->initial_max_stream_data_uni = 256 * 1024;
+        params->initial_max_data = 1024 * 1024;
+        params->initial_max_streams_bidi = 100;
+        params->initial_max_streams_uni = 100;
+        params->active_connection_id_limit = 4;
+        params->disable_active_migration = 1;
+        return;
+    }
+
     if (!SvROK(transport_sv) ||
         SvTYPE(SvRV(transport_sv)) != SVt_PVAV) {
         croak("invalid internal transport configuration");
@@ -147,7 +161,8 @@ net_quic_apply_transport_config(
         handshake_ms > UINT64_MAX / NGTCP2_MILLISECONDS) {
         croak("handshake_timeout is outside the supported range");
     }
-    if (idle_ms > NGTCP2_MAX_VARINT) {
+    if (idle_ms > NGTCP2_MAX_VARINT ||
+        idle_ms > UINT64_MAX / NGTCP2_MILLISECONDS) {
         croak("idle_timeout is outside the supported range");
     }
     if (connection_window > NGTCP2_MAX_VARINT) {
@@ -329,7 +344,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -490,7 +505,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv, server_secret_sv, transport_sv)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv

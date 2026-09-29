@@ -268,4 +268,61 @@ is(
     'local closed stream is reclaimed after its object is released',
 );
 
+my $detached_client = $client->connection->open_uni_stream;
+my $detached_id = $detached_client->id;
+$detached_client->send("released-before-close\n");
+$detached_client->finish;
+
+undef $detached_client;
+is(
+    $client->connection->_stream_state_count,
+    1,
+    'unclosed native state survives after its Perl Stream is released',
+);
+
+my $detached_server;
+my $detached_received = '';
+
+for (1 .. 500) {
+    pump_pair($client, $server);
+    $detached_server ||= $server->next_stream;
+
+    if ($detached_server) {
+        while (defined(my $chunk = $detached_server->next_data)) {
+            $detached_received .= $chunk;
+        }
+    }
+
+    last if $client->connection->_stream_state_count == 0
+        && $detached_server
+        && $detached_server->remote_finished
+        && $detached_received eq "released-before-close\n";
+}
+
+is(
+    $detached_received,
+    "released-before-close\n",
+    'dropping the local Stream does not discard queued transmit data',
+);
+is(
+    $client->connection->_stream_state_count,
+    0,
+    'native state is reclaimed when a later close arrives with no Stream owner',
+);
+isa_ok($detached_server, ['Net::QUIC::Stream']);
+is($detached_server->id, $detached_id, 'peer still discovers the detached stream');
+
+for (1 .. 300) {
+    last if $detached_server->closed;
+    pump_pair($client, $server);
+}
+
+ok($detached_server->closed, 'peer side of detached stream closes normally');
+undef $detached_server;
+is(
+    $server->_stream_state_count,
+    0,
+    'peer native state is reclaimed after its Stream object is released',
+);
+
 done_testing;

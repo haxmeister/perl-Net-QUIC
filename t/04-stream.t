@@ -116,6 +116,7 @@ ok($server->ready, 'server is ready for stream proof');
 
 my $stream_id = $client->connection->_open_bidi_stream;
 ok($stream_id >= 0, 'client opens a real bidirectional QUIC stream');
+$client->connection->_stream_retain($stream_id);
 
 my $request = join '', map { "request-$_\n" } 1 .. 1200;
 $client->connection->_queue_stream_data($stream_id, $request, 1);
@@ -160,5 +161,7 @@ for (1 .. 200) {
 is($client_stream_id, $stream_id, 'client response stays on the same bidi stream');
 is($client_received, $response, 'client receives the response bytes');
 ok($client_fin, 'client receives server FIN');
+
+$client->connection->_stream_release($stream_id);
 
 done_testing;

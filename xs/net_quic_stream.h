@@ -1,6 +1,8 @@
 #ifndef NET_QUIC_STREAM_H
 #define NET_QUIC_STREAM_H
 
+#define NET_QUIC_STREAM_TX_CHUNK_SIZE 16384
+
 typedef struct net_quic_stream_tx_chunk net_quic_stream_tx_chunk;
 typedef struct net_quic_stream_rx_chunk net_quic_stream_rx_chunk;
 
@@ -408,8 +410,12 @@ net_quic_stream_queue_data(
     size_t datalen
 )
 {
+    net_quic_stream_tx_chunk *head = NULL;
+    net_quic_stream_tx_chunk *tail = NULL;
     net_quic_stream_tx_chunk *chunk;
-    size_t alloclen;
+    net_quic_stream_tx_chunk *next;
+    size_t consumed = 0;
+    size_t chunklen;
 
     if (datalen == 0) {
         return 0;
@@ -422,31 +428,53 @@ net_quic_stream_queue_data(
         return NGTCP2_ERR_INVALID_ARGUMENT;
     }
 
-    Newxz(chunk, 1, net_quic_stream_tx_chunk);
-    if (chunk == NULL) {
-        return NGTCP2_ERR_NOMEM;
-    }
+    while (consumed < datalen) {
+        chunklen = datalen - consumed;
+        if (chunklen > NET_QUIC_STREAM_TX_CHUNK_SIZE) {
+            chunklen = NET_QUIC_STREAM_TX_CHUNK_SIZE;
+        }
 
-    alloclen = datalen == 0 ? 1 : datalen;
-    Newx(chunk->data, alloclen, uint8_t);
-    if (chunk->data == NULL) {
-        Safefree(chunk);
-        return NGTCP2_ERR_NOMEM;
-    }
+        Newxz(chunk, 1, net_quic_stream_tx_chunk);
+        if (chunk == NULL) {
+            goto nomem;
+        }
 
-    memcpy(chunk->data, data, datalen);
-    chunk->len = datalen;
-    chunk->offset = stream->tx_next_offset;
-    stream->tx_next_offset += (uint64_t)datalen;
+        Newx(chunk->data, chunklen, uint8_t);
+        if (chunk->data == NULL) {
+            Safefree(chunk);
+            goto nomem;
+        }
+
+        memcpy(chunk->data, data + consumed, chunklen);
+        chunk->len = chunklen;
+        chunk->offset = stream->tx_next_offset + (uint64_t)consumed;
+
+        if (tail != NULL) {
+            tail->next = chunk;
+        } else {
+            head = chunk;
+        }
+        tail = chunk;
+        consumed += chunklen;
+    }
 
     if (stream->tx_tail != NULL) {
-        stream->tx_tail->next = chunk;
+        stream->tx_tail->next = head;
     } else {
-        stream->tx_head = chunk;
+        stream->tx_head = head;
     }
-    stream->tx_tail = chunk;
+    stream->tx_tail = tail;
+    stream->tx_next_offset += (uint64_t)datalen;
 
     return 0;
+
+nomem:
+    for (chunk = head; chunk != NULL; chunk = next) {
+        next = chunk->next;
+        net_quic_stream_tx_chunk_free(aTHX_ chunk);
+    }
+
+    return NGTCP2_ERR_NOMEM;
 }
 
 static int
@@ -511,6 +539,32 @@ net_quic_stream_pending_chunk(net_quic_stream_state *stream)
     }
 
     return NULL;
+}
+
+static size_t
+net_quic_stream_tx_chunk_count(const net_quic_stream_state *stream)
+{
+    const net_quic_stream_tx_chunk *chunk;
+    size_t count = 0;
+
+    for (chunk = stream->tx_head; chunk != NULL; chunk = chunk->next) {
+        ++count;
+    }
+
+    return count;
+}
+
+static uint64_t
+net_quic_stream_tx_buffered_bytes(const net_quic_stream_state *stream)
+{
+    const net_quic_stream_tx_chunk *chunk;
+    uint64_t total = 0;
+
+    for (chunk = stream->tx_head; chunk != NULL; chunk = chunk->next) {
+        total += (uint64_t)chunk->len;
+    }
+
+    return total;
 }
 
 static size_t

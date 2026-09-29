@@ -4,12 +4,77 @@ use strict;
 use warnings;
 
 use Carp qw(croak);
-use Scalar::Util qw(refaddr);
+use Scalar::Util qw(looks_like_number refaddr);
 use Net::QUIC ();
 use Net::QUIC::Connection ();
 use Net::QUIC::Datagram ();
 
 our $VERSION = $Net::QUIC::VERSION;
+
+sub _transport_config {
+    my ($class, $value) = @_;
+
+    $value = {} if !defined $value;
+
+    croak "transport must be a hash reference"
+        if ref($value) ne 'HASH';
+
+    my %config = (
+        handshake_timeout => 10,
+        idle_timeout      => 30,
+        connection_window => 1024 * 1024,
+        stream_window     => 256 * 1024,
+        max_bidi_streams  => 100,
+        max_uni_streams   => 100,
+    );
+
+    my %known = map { $_ => 1 } keys %config;
+
+    for my $name (keys %$value) {
+        croak "unknown transport option: $name"
+            if !$known{$name};
+        $config{$name} = $value->{$name};
+    }
+
+    for my $name (qw(handshake_timeout idle_timeout)) {
+        my $seconds = $config{$name};
+
+        croak "$name must be a non-negative number of seconds"
+            if !defined($seconds)
+            || !looks_like_number($seconds)
+            || $seconds < 0
+            || "$seconds" =~ /nan|inf/i;
+
+        croak "handshake_timeout must be greater than zero"
+            if $name eq 'handshake_timeout' && $seconds == 0;
+
+        $config{$name} = int($seconds * 1000 + 0.5);
+    }
+
+    for my $name (qw(
+        connection_window
+        stream_window
+        max_bidi_streams
+        max_uni_streams
+    )) {
+        my $number = $config{$name};
+
+        croak "$name must be a non-negative integer"
+            if !defined($number)
+            || $number !~ /\A\d+\z/;
+
+        $config{$name} = 0 + $number;
+    }
+
+    return [
+        $config{handshake_timeout},
+        $config{idle_timeout},
+        $config{connection_window},
+        $config{stream_window},
+        $config{max_bidi_streams},
+        $config{max_uni_streams},
+    ];
+}
 
 sub client {
     my ($class, %args) = @_;
@@ -26,12 +91,15 @@ sub client {
         ? $args{ca_file}
         : '';
 
+    my $transport = $class->_transport_config(delete $args{transport});
+
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
         $args{peer},
         $args{alpn},
         $args{server_name},
         $ca_file,
+        $transport,
     );
 
     return bless {
@@ -53,6 +121,8 @@ sub server {
         $args{private_key_file},
     );
 
+    my $transport = $class->_transport_config(delete $args{transport});
+
     return bless {
         mode                => 'server',
         alpn                => $args{alpn},
@@ -60,6 +130,7 @@ sub server {
         cid_length          => $class->_server_cid_length,
         server_secret       => $class->_server_secret,
         validate_address    => $args{validate_address} ? 1 : 0,
+        transport           => $transport,
         stateless_tx        => [],
         routes              => {},
         connections         => [],
@@ -162,6 +233,7 @@ sub _server_receive_datagram {
             $self->{server_tls},
             $front->[1],
             $self->{server_secret},
+            $self->{transport},
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);

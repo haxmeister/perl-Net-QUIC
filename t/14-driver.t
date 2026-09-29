@@ -6,6 +6,7 @@ use Test2::V0;
 
 use Net::QUIC::Datagram;
 use Net::QUIC::Driver;
+use Net::QUIC::Stream;
 
 {
     package T::Driver::Connection;
@@ -79,6 +80,80 @@ use Net::QUIC::Driver;
         return;
     }
 }
+
+{
+    package T::Driver::StreamConnection;
+
+    sub new {
+        my ($class) = @_;
+        return bless {
+            notified => 0,
+            data     => [],
+            released => 0,
+        }, $class;
+    }
+
+    sub _stream_retain { return }
+    sub _stream_release {
+        my ($self) = @_;
+        $self->{released}++;
+        return;
+    }
+    sub _stream_send {
+        my ($self, $id, $bytes) = @_;
+        $self->{sent} = [$id, $bytes];
+        return;
+    }
+    sub _stream_finish {
+        my ($self, $id) = @_;
+        $self->{finished} = $id;
+        return;
+    }
+    sub _stream_take_data {
+        my ($self) = @_;
+        return shift @{$self->{data}};
+    }
+    sub _stream_reset {
+        my ($self, $id, $code) = @_;
+        $self->{reset} = [$id, $code];
+        return;
+    }
+    sub _notify_output {
+        my ($self) = @_;
+        $self->{notified}++;
+        return;
+    }
+}
+
+my $stream_connection = T::Driver::StreamConnection->new;
+my $stream = Net::QUIC::Stream->_new(
+    $stream_connection,
+    4,
+    1,
+    1,
+);
+
+$stream->send('stream-data');
+is($stream_connection->{notified}, 1,
+    'Stream send notifies integration output');
+
+$stream->finish;
+is($stream_connection->{notified}, 2,
+    'Stream finish notifies integration output');
+
+push @{$stream_connection->{data}}, ['received-data'];
+is($stream->next_data, 'received-data',
+    'Stream test connection returns received data');
+is($stream_connection->{notified}, 3,
+    'consuming stream data notifies integration output');
+
+$stream->reset(9);
+is($stream_connection->{notified}, 4,
+    'Stream reset notifies integration output');
+
+undef $stream;
+is($stream_connection->{released}, 1,
+    'Stream test object releases its retained stream state');
 
 my $local = pack_sockaddr_in(40000, inet_aton('127.0.0.1'));
 my $peer  = pack_sockaddr_in(4433, inet_aton('127.0.0.1'));

@@ -596,6 +596,11 @@ _open_stream(self, bidirectional)
             &stream_id
         );
         if (rv == NGTCP2_ERR_STREAM_ID_BLOCKED) {
+            if (bidirectional) {
+                ep->local_bidi_stream_waiting = 1;
+            } else {
+                ep->local_uni_stream_waiting = 1;
+            }
             RETVAL = &PL_sv_undef;
         } else if (rv != 0) {
             croak(

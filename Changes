@@ -91,6 +91,13 @@ Revision history for Net-QUIC
       lifetime of the public Stream object.
     - Test ownership transfer from the pending incoming-stream queue to a
       returned Stream object and verify native stream counts return to zero.
+    - Split large Stream send buffers into fixed-size native transmit chunks.
+    - Release fully acknowledged leading chunks without waiting for the entire
+      original send call to be acknowledged.
+    - Keep chunk creation atomic so allocation failure cannot queue a partial
+      application send.
+    - Test partial ACK-driven memory release while later chunks are still
+      buffered, along with exact byte ordering and FIN behavior.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

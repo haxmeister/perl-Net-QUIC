@@ -36,6 +36,8 @@ struct net_quic_stream_state {
     int closed;
     int remote_reset;
     uint64_t remote_reset_code;
+    int local_reset;
+    uint64_t local_reset_code;
     uint64_t rx_next_offset;
     uint64_t tx_next_offset;
     uint64_t tx_acked_through;

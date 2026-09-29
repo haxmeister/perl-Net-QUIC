@@ -36,6 +36,69 @@ net_quic_stream_close_limit_cb(
     return 0;
 }
 
+static int
+net_quic_start_error_close(
+    net_quic_connection *ep,
+    int rv,
+    ngtcp2_tstamp now
+)
+{
+    ngtcp2_ccerr ccerr;
+    ngtcp2_path_storage ps;
+    ngtcp2_pkt_info pi;
+    ngtcp2_ssize nwrite;
+
+    ngtcp2_ccerr_default(&ccerr);
+
+    if (rv == NGTCP2_ERR_CRYPTO) {
+        ngtcp2_ccerr_set_tls_alert(
+            &ccerr,
+            ngtcp2_conn_get_tls_alert(ep->conn),
+            NULL,
+            0
+        );
+    } else {
+        ngtcp2_ccerr_set_liberr(&ccerr, rv, NULL, 0);
+    }
+
+    ngtcp2_path_storage_zero(&ps);
+    memset(&pi, 0, sizeof(pi));
+
+    nwrite = ngtcp2_conn_write_connection_close(
+        ep->conn,
+        &ps.path,
+        &pi,
+        ep->txbuf,
+        sizeof(ep->txbuf),
+        &ccerr,
+        now
+    );
+    if (nwrite < 0) {
+        return (int)nwrite;
+    }
+
+    if (nwrite > 0) {
+        if (net_quic_copy_ngtcp2_addr(
+                &ep->close_local_addr,
+                &ep->close_local_addrlen,
+                &ps.path.local
+            ) != 0 ||
+            net_quic_copy_ngtcp2_addr(
+                &ep->close_peer_addr,
+                &ep->close_peer_addrlen,
+                &ps.path.remote
+            ) != 0) {
+            return NGTCP2_ERR_INTERNAL;
+        }
+
+        ep->closebuflen = (size_t)nwrite;
+        ep->closebuf_pending = 1;
+    }
+
+    net_quic_start_close_wait(ep, now);
+    return 0;
+}
+
 static net_quic_server_tls *
 net_quic_server_tls_from_sv(SV *self)
 {

@@ -378,7 +378,8 @@ subtest 'staggered multi-connection retirement' => sub {
     }
 
     my @server_for;
-    my @server_stream_for;
+    my %server_stream_for;
+    my %server_finished;
     my %received_for;
 
     for (1 .. 2000) {
@@ -386,11 +387,11 @@ subtest 'staggered multi-connection retirement' => sub {
 
         for my $connection (@accepted) {
             my $key = refaddr($connection);
-            my $stream = $server_stream_for[$key];
+            my $stream = $server_stream_for{$key};
 
             if (!$stream) {
                 $stream = $connection->next_stream;
-                $server_stream_for[$key] = $stream if $stream;
+                $server_stream_for{$key} = $stream if $stream;
             }
 
             next if !$stream;
@@ -405,8 +406,9 @@ subtest 'staggered multi-connection retirement' => sub {
 
                 $server_for[$index] = $connection;
 
-                if (!$stream->local_finished) {
+                if (!$server_finished{$key}) {
                     $stream->finish;
+                    $server_finished{$key} = 1;
                 }
             }
         }
@@ -420,9 +422,9 @@ subtest 'staggered multi-connection retirement' => sub {
 
     for my $connection (@accepted) {
         my $key = refaddr($connection);
-        my $stream = $server_stream_for[$key];
+        my $stream = $server_stream_for{$key};
         undef $stream;
-        $server_stream_for[$key] = undef;
+        delete $server_stream_for{$key};
     }
 
     @client_streams = ();
@@ -495,6 +497,8 @@ subtest 'staggered multi-connection retirement' => sub {
     weaken($_) for @weak_servers;
 
     @server_for = ();
+    %server_stream_for = ();
+    %server_finished = ();
     %received_for = ();
     @accepted = ();
     @clients = ();

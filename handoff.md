@@ -2,33 +2,34 @@
 
 ## Current branch
 
-feature/stateless-reset
+feature/stream-state-reclamation
 
 Current main baseline:
 
-ad7ff88f999142935f22bbfe18141d61f5b22cfe
+a35acccff0fe410e6915860ea1a0cc682fbb895f
 
-Validated branch checkpoint before this handoff update:
+Previous completed work:
 
-c691bf69fd3e01665ca1630472edcb6e37c9069d
-
-Draft PR:
-
-#2
+- feature/stateless-reset was merged to main through PR #2
+- validated Stateless Reset checkpoint: c691bf69fd3e01665ca1630472edcb6e37c9069d
+- validated full matrix: GitHub Actions run 36499381840, 15/15 PASS
+- merged main commit: a35acccff0fe410e6915860ea1a0cc682fbb895f
 
 Immediate branch scope is complete:
 
-- implement Stateless Reset for unknown server connection IDs
-- derive reset tokens from an Endpoint-private secret and the destination CID
-- advertise the initial server reset token during the handshake
-- derive reset tokens for later server-issued CIDs
-- reset only eligible unknown short-header packets
-- drop unknown long-header and undersized packets
-- keep reset responses smaller than the packets that trigger them
-- do not allocate Connection state just to answer with a reset
-- preserve the existing public Endpoint API and event-loop boundary
-
-The branch is not merged into main.
+- closed native per-stream state is reclaimed when no owner still needs it
+- each public Net::QUIC::Stream object retains its native stream record
+- the pending incoming-stream queue keeps a closed remote stream alive until
+  next_stream returns its public Stream object
+- releasing a Stream before QUIC close does not discard queued transmit data;
+  the state is reclaimed when the later close callback arrives
+- reclamation runs only after ngtcp2 calls return, not from inside ngtcp2's
+  stream_close callback
+- linked-list and round-robin transmit cursor state remain valid when a stream
+  record is removed
+- FIN, reset, acknowledgement, receive flow-control, and public Stream behavior
+  remain unchanged
+- no public API change was required
 
 ## Purpose
 
@@ -218,11 +219,15 @@ streams, unidirectional stream direction rules, FIN, and reset. The in-memory
 tests also honor positive QUIC pacing timeouts, matching the real Endpoint timer
 contract instead of relying on CPU timing.
 
-Two stream memory improvements remain before calling this area finished:
+Closed per-stream state reclamation is now implemented. A public Stream object
+retains its native record, and the pending incoming-stream queue owns a remote
+stream until next_stream hands it to the application. Closed state is freed as
+soon as neither owner remains. If the application drops a Stream before QUIC
+close, the still-active native state remains until ngtcp2 later closes it and is
+then reclaimed automatically.
 
-- Closed stream state is currently retained until the Connection is destroyed.
-  This is safe but should eventually be reclaimed when no Perl Stream object or
-  incoming-stream queue entry still needs it.
+One stream memory improvement remains before calling this area finished:
+
 - One large send call is one immutable transmit allocation, so partially
   acknowledged data cannot release part of that allocation. Fixed-size transmit
   chunks can improve memory release later without changing the public API.
@@ -493,13 +498,59 @@ Focused tests prove:
 - after normal Connection retirement and CID route cleanup, a replayed eligible
   short-header packet receives a reset without recreating Connection state
 
+Stream state reclamation is now implemented on
+feature/stream-state-reclamation.
+
+Code-bearing checkpoint:
+
+- head: 189412c00bd71550f8cdf1ec094ea939fcc2a0ad
+- draft PR: #3
+- GitHub Actions run: 36501080050
+- full 15-job matrix: PASS
+- 13 test files / 201 tests
+- Linux Perl 5.20 through 5.44: PASS
+- macOS: PASS
+- Windows: PASS
+
+Lifetime behavior now is:
+
+- every public Net::QUIC::Stream retains the corresponding native stream record
+- Stream destruction releases that ownership
+- an incoming stream waiting in Connection->next_stream has an independent
+  queue hold, so it can close before the application accepts it without losing
+  buffered data or final status
+- next_stream transfers practical ownership from the queue to the returned
+  public Stream object without exposing a gap where the native record can be
+  collected
+- closed native state is removed from the Connection stream list once no
+  Stream object and no incoming queue entry needs it
+- transmit round-robin cursor state is repaired when the removed stream was the
+  current cursor
+- reclamation after ngtcp2 activity happens only after the ngtcp2 call returns,
+  avoiding free-from-inside-callback lifetime hazards
+- dropping a Stream object before QUIC close leaves active native state intact
+  long enough to finish queued transmission and later reclaims it automatically
+- the old ID-only t/04 native development proof takes an explicit private
+  lifetime hold because it intentionally operates without public Stream objects
+- no public API change was required
+
+Focused tests prove:
+
+- closed stream status remains readable while the public Stream exists
+- closed native state is reclaimed immediately after the last public Stream is
+  released
+- a closed incoming stream remains queued until next_stream accepts it
+- buffered receive data remains readable after native stream close
+- queue ownership transfers safely to the returned Stream object
+- a Stream can be released before close without losing queued transmit data
+- the later close callback reclaims that unowned native stream automatically
+- native stream counts return to zero after ownership is gone
+
 Next:
 
-1. Reclaim closed per-stream state when no public object or incoming queue
-   entry needs it.
-2. Consider fixed-size transmit chunks for earlier ACK memory release.
-3. Write a small Linux::Event adapter after the raw contract is stable.
-4. Keep HTTP/3 out of this transport layer for now.
+1. Consider fixed-size transmit chunks for earlier ACK memory release.
+2. Write a small Linux::Event adapter after the raw contract is stable.
+3. Keep HTTP/3 out of this transport layer for now.
 
 ## Repository hygiene
 

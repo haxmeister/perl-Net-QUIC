@@ -143,6 +143,12 @@ After `send`, `finish`, or `reset`, the surrounding integration uses the
 same endpoint cycle as before: drain `next_datagram` and rearm the endpoint
 timer.
 
+Closed stream state remains available while the application still holds its
+`Net::QUIC::Stream` object. This keeps final status and unread buffered data
+usable after QUIC closes the stream. Once the stream is closed and neither a
+Stream object nor the pending incoming-stream queue needs it, Net::QUIC
+reclaims the native per-stream state.
+
 The first multi-connection server Endpoint and stateless server front door are
 implemented. Client certificate and hostname verification are enabled by
 default.

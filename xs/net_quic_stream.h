@@ -26,6 +26,8 @@ struct net_quic_stream_state {
     int local_initiated;
     int bidirectional;
     int incoming_announced;
+    int incoming_queued;
+    size_t public_refs;
     int remote_finished;
     int local_finished;
     int write_shutdown;
@@ -96,6 +98,7 @@ net_quic_stream_announce_incoming(
     }
 
     stream->incoming_announced = 1;
+    stream->incoming_queued = 1;
     stream->incoming_next = NULL;
 
     if (ep->incoming_stream_tail != NULL) {
@@ -229,6 +232,104 @@ net_quic_stream_free_rx(pTHX_ net_quic_stream_state *stream)
 
     stream->rx_head = NULL;
     stream->rx_tail = NULL;
+}
+
+static void
+net_quic_stream_unlink_free(
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    net_quic_stream_state *prev = NULL;
+    net_quic_stream_state *cur = ep->streams;
+    net_quic_stream_state *next;
+
+    while (cur != NULL && cur != stream) {
+        prev = cur;
+        cur = cur->next;
+    }
+
+    if (cur == NULL) {
+        return;
+    }
+
+    next = cur->next;
+
+    if (prev != NULL) {
+        prev->next = next;
+    } else {
+        ep->streams = next;
+    }
+
+    if (ep->streams_tail == cur) {
+        ep->streams_tail = prev;
+    }
+
+    if (ep->tx_cursor == cur) {
+        ep->tx_cursor = next != NULL ? next : ep->streams;
+    }
+
+    if (ep->streams == NULL) {
+        ep->streams_tail = NULL;
+        ep->tx_cursor = NULL;
+    }
+
+    net_quic_stream_free_tx(aTHX_ cur);
+    net_quic_stream_free_rx(aTHX_ cur);
+    Safefree(cur);
+}
+
+static int
+net_quic_stream_reclaimable(const net_quic_stream_state *stream)
+{
+    return stream->closed &&
+           stream->public_refs == 0 &&
+           !stream->incoming_queued;
+}
+
+static void
+net_quic_stream_reclaim_closed(pTHX_ net_quic_connection *ep)
+{
+    net_quic_stream_state *stream;
+    net_quic_stream_state *next;
+
+    for (stream = ep->streams; stream != NULL; stream = next) {
+        next = stream->next;
+
+        if (net_quic_stream_reclaimable(stream)) {
+            net_quic_stream_unlink_free(aTHX_ ep, stream);
+        }
+    }
+}
+
+static int
+net_quic_stream_retain(net_quic_stream_state *stream)
+{
+    if (stream->public_refs == SIZE_MAX) {
+        return -1;
+    }
+
+    ++stream->public_refs;
+    return 0;
+}
+
+static int
+net_quic_stream_release(
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    if (stream->public_refs == 0) {
+        return -1;
+    }
+
+    --stream->public_refs;
+
+    if (net_quic_stream_reclaimable(stream)) {
+        net_quic_stream_unlink_free(aTHX_ ep, stream);
+    }
+
+    return 0;
 }
 
 static void
@@ -466,6 +567,7 @@ net_quic_stream_next_incoming(net_quic_connection *ep)
         ep->incoming_stream_tail = NULL;
     }
     stream->incoming_next = NULL;
+    stream->incoming_queued = 0;
 
     return stream;
 }

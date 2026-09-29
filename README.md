@@ -149,6 +149,11 @@ usable after QUIC closes the stream. Once the stream is closed and neither a
 Stream object nor the pending incoming-stream queue needs it, Net::QUIC
 reclaims the native per-stream state.
 
+Large `send` calls are copied into fixed-size internal transmit chunks.
+Acknowledged chunks are released independently, so a long-lived or
+flow-controlled stream does not have to retain the entire original application
+send allocation until its final byte is acknowledged.
+
 The first multi-connection server Endpoint and stateless server front door are
 implemented. Client certificate and hostname verification are enabled by
 default.

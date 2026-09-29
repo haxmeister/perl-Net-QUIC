@@ -102,6 +102,9 @@ sub run_handshake {
             && $client->connection->ready
             && $server_connection->ready;
 
+        return ($client, $server_connection, undef)
+            if defined $client->connection->close_info;
+
         my $server_after = $server->timeout_after;
         my $client_after = $client->timeout_after;
 
@@ -140,15 +143,30 @@ my ($untrusted_client, $untrusted_server, $untrusted_error) = run_handshake(
     server_name => 'localhost',
 );
 
-ok(defined($untrusted_error), 'self-signed certificate is rejected without trust anchor');
+ok(!defined($untrusted_error), 'certificate rejection does not escape as an exception');
 ok(!$untrusted_client->connection->ready, 'untrusted client never becomes ready');
+is(
+    $untrusted_client->connection->close_info->{type},
+    'certificate',
+    'self-signed certificate is reported as a certificate failure',
+);
+is(
+    $untrusted_client->connection->close_info->{initiator},
+    'local',
+    'certificate failure is detected locally',
+);
 
 my ($wrong_name_client, $wrong_name_server, $wrong_name_error) = run_handshake(
     server_name => 'not-localhost.example',
     ca_file     => $cert_file,
 );
 
-ok(defined($wrong_name_error), 'certificate with wrong host name is rejected');
+ok(!defined($wrong_name_error), 'wrong-name rejection does not escape as an exception');
 ok(!$wrong_name_client->connection->ready, 'wrong-name client never becomes ready');
+is(
+    $wrong_name_client->connection->close_info->{type},
+    'certificate',
+    'wrong host name is reported as a certificate failure',
+);
 
 done_testing;

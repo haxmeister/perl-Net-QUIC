@@ -86,8 +86,9 @@ Net::QUIC::Connection - one QUIC connection
 
 Net::QUIC::Connection represents one QUIC connection.
 
-Application-facing connection and stream behavior belongs here. UDP socket and
-timer integration belongs to L<Net::QUIC::Endpoint>.
+Application-facing connection and stream behavior belongs here. Ordinary UDP
+socket and timer integration is driven through L<Net::QUIC::Driver>.
+L<Net::QUIC::Endpoint> remains the lower-level transport boundary.
 
 The connection objects are currently created by
 L<Net::QUIC::Endpoint/client>. Direct construction is private while the API is
@@ -129,8 +130,9 @@ connection is already closing is harmless.
 
 C<close> does not immediately destroy the Connection object. QUIC keeps a
 closing or draining connection around for a short period so late packets are
-handled correctly. The surrounding L<Net::QUIC::Endpoint> continues to report
-the timer needed for that period.
+handled correctly. When the Connection belongs to a L<Net::QUIC::Driver>, the
+Driver automatically services the close packet and updates the required QUIC
+timeout.
 
 =head2 closed
 

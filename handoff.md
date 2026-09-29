@@ -2,11 +2,11 @@
 
 ## Current branch
 
-feature/stream-state-reclamation
+feature/fixed-size-transmit-chunks
 
 Current main baseline:
 
-a35acccff0fe410e6915860ea1a0cc682fbb895f
+28e550af11df8ad0a0f39d58e4aa1ae53e5f80da
 
 Previous completed work:
 
@@ -15,21 +15,24 @@ Previous completed work:
 - validated full matrix: GitHub Actions run 36499381840, 15/15 PASS
 - merged main commit: a35acccff0fe410e6915860ea1a0cc682fbb895f
 
-Immediate branch scope is complete:
+Previous completed work:
 
-- closed native per-stream state is reclaimed when no owner still needs it
-- each public Net::QUIC::Stream object retains its native stream record
-- the pending incoming-stream queue keeps a closed remote stream alive until
-  next_stream returns its public Stream object
-- releasing a Stream before QUIC close does not discard queued transmit data;
-  the state is reclaimed when the later close callback arrives
-- reclamation runs only after ngtcp2 calls return, not from inside ngtcp2's
-  stream_close callback
-- linked-list and round-robin transmit cursor state remain valid when a stream
-  record is removed
-- FIN, reset, acknowledgement, receive flow-control, and public Stream behavior
-  remain unchanged
-- no public API change was required
+- feature/stream-state-reclamation was merged to main through PR #3
+- validated code-bearing checkpoint: 189412c00bd71550f8cdf1ec094ea939fcc2a0ad
+- validated full matrix: GitHub Actions run 36501080050, 15/15 PASS
+- merged main commit: 28e550af11df8ad0a0f39d58e4aa1ae53e5f80da
+
+Immediate branch scope:
+
+- split large application send buffers into fixed-size native transmit chunks
+- allow fully acknowledged chunks to be freed before the entire original send
+  call has been acknowledged
+- preserve byte ordering, FIN placement, retransmission safety, and immutable
+  bytes until acknowledgement or stream close
+- preserve the existing public Stream->send API and event-loop boundary
+- avoid changing transmit fairness or stream scheduling semantics
+- choose chunk sizing based on memory behavior and packetization needs rather
+  than exposing a new public tuning knob unless evidence justifies one
 
 ## Purpose
 
@@ -548,7 +551,8 @@ Focused tests prove:
 
 Next:
 
-1. Consider fixed-size transmit chunks for earlier ACK memory release.
+1. Implement and validate fixed-size transmit chunks for earlier ACK memory
+   release.
 2. Write a small Linux::Event adapter after the raw contract is stable.
 3. Keep HTTP/3 out of this transport layer for now.
 

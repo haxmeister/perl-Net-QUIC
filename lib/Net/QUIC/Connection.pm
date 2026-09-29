@@ -99,6 +99,11 @@ sub close {
     return;
 }
 
+sub close_info {
+    my ($self) = @_;
+    return $self->_close_info;
+}
+
 sub closed {
     my ($self) = @_;
     return $self->_retired;
@@ -192,6 +197,39 @@ closing or draining connection around for a short period so late packets are
 handled correctly. When the Connection belongs to a L<Net::QUIC::Driver>, the
 Driver automatically services the close packet and updates the required QUIC
 timeout.
+
+=head2 close_info
+
+    my $info = $connection->close_info;
+
+Returns undef while no connection close or failure has been recorded.
+
+Once a connection is closing or has failed, returns a small hash reference.
+The common fields are:
+
+    type       application, transport, tls, certificate,
+               handshake, idle, or drop
+
+    initiator  local or peer
+
+    code       the application, QUIC transport, or TLS alert code
+
+C<frame_type> is included when a peer transport close identifies the QUIC frame
+that caused the error. C<native_error> is included for failures detected by
+ngtcp2 locally.
+
+A normal application close uses C<type =E<gt> 'application'> and code zero.
+This means local and peer normal closes can be distinguished without treating
+either one as an exception.
+
+TLS certificate verification failures use C<type =E<gt> 'certificate'>.
+Other TLS failures use C<type =E<gt> 'tls'>. Handshake timeout uses
+C<type =E<gt> 'handshake'>.
+
+Local API misuse, invalid configuration, allocation failure, and internal
+implementation failures still throw exceptions instead of becoming
+C<close_info>. Those are local program/system failures rather than remote
+connection outcomes.
 
 =head2 closed
 

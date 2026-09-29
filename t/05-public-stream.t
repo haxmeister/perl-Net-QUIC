@@ -257,7 +257,9 @@ like(
 
 my $reset_client = $client->connection->open_bidi_stream;
 my $reset_id = $reset_client->id;
+ok(!defined($reset_client->local_reset_code), 'local reset code starts undefined');
 $reset_client->reset(77);
+is($reset_client->local_reset_code, 77, 'local stream reset code is retained');
 
 my $reset_server;
 for (1 .. 200) {
@@ -275,5 +277,6 @@ for (1 .. 200) {
 
 isa_ok($reset_server, ['Net::QUIC::Stream']);
 is($reset_server->remote_reset_code, 77, 'peer receives stream reset error code');
+ok(!defined($reset_server->local_reset_code), 'peer stream was not reset locally');
 
 done_testing;

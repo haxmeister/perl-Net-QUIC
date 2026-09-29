@@ -165,6 +165,39 @@ The Driver uses an Endpoint internally to build real QUIC packets and maintain
 ngtcp2's expiry deadlines. The connection reports handshake readiness and can
 open bidirectional and unidirectional QUIC streams.
 
+## Transport defaults
+
+Client and server constructors accept an optional `transport` hash:
+
+```perl
+transport => {
+    handshake_timeout => 10,
+    idle_timeout      => 30,
+    connection_window => 1024 * 1024,
+    stream_window     => 256 * 1024,
+    max_bidi_streams  => 100,
+    max_uni_streams   => 100,
+}
+```
+
+Those values are the defaults.
+
+Timeouts are in seconds. The receive windows are in bytes. Stream and
+connection receive credit is returned as application data is consumed, so the
+window values are starting flow-control credit rather than lifetime transfer
+limits.
+
+`max_bidi_streams` and `max_uni_streams` control the initial number of
+peer-initiated concurrent streams. Stream credit is replenished as streams
+close.
+
+Active connection migration is deliberately advertised as disabled for now.
+Migration will become configurable only when Net::QUIC implements and tests
+the required path-change behavior.
+
+Lower-level ACK timing, congestion control, PMTU, packet-size shaping, and
+connection-ID behavior remain internal policy rather than public knobs.
+
 ## Streams
 
 A connection opens a local stream:

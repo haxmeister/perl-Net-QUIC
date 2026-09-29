@@ -111,6 +111,11 @@ sub remote_reset_code {
     return $self->{connection}->_stream_remote_reset_code($self->{id});
 }
 
+sub local_reset_code {
+    my ($self) = @_;
+    return $self->{connection}->_stream_local_reset_code($self->{id});
+}
+
 sub reset {
     my ($self, $app_error_code) = @_;
 
@@ -228,6 +233,14 @@ zero when omitted.
 
 Returns the application error code when the peer reset the stream, or undef if
 no peer reset has been received.
+
+=head2 local_reset_code
+
+Returns the application error code passed to C<reset> on this side, or undef if
+this side has not reset the stream.
+
+This is separate from C<remote_reset_code> so an application can distinguish a
+peer reset from its own local reset without inspecting exception text.
 
 =head2 closed
 

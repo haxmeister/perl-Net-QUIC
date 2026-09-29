@@ -944,6 +944,28 @@ _stream_remote_reset_code(self, stream_id_iv)
     OUTPUT:
         RETVAL
 
+SV *
+_stream_local_reset_code(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (!stream->local_reset) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVuv((UV)stream->local_reset_code);
+        }
+    OUTPUT:
+        RETVAL
+
 void
 _stream_reset(self, stream_id_iv, app_error_code_uv)
     SV *self
@@ -970,6 +992,8 @@ _stream_reset(self, stream_id_iv, app_error_code_uv)
             croak("unable to reset QUIC stream: %s", ngtcp2_strerror(rv));
         }
 
+        stream->local_reset = 1;
+        stream->local_reset_code = (uint64_t)app_error_code_uv;
         stream->write_shutdown = 1;
         net_quic_stream_reclaim_closed(aTHX_ ep);
 

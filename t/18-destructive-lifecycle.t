@@ -362,13 +362,13 @@ subtest 'staggered multi-connection retirement' => sub {
         }
 
         last if @accepted == 3
-            && !grep { !$_->connection->ready } @clients
-            && !grep { !$_->ready } @accepted;
+            && !(grep { !$_->connection->ready } @clients)
+            && !(grep { !$_->ready } @accepted);
     }
 
     is(scalar(@accepted), 3, 'server accepts all three lifecycle clients');
-    ok(!grep { !$_->connection->ready } @clients, 'all clients are ready');
-    ok(!grep { !$_->ready } @accepted, 'all server Connections are ready');
+    ok(!(grep { !$_->connection->ready } @clients), 'all clients are ready');
+    ok(!(grep { !$_->ready } @accepted), 'all server Connections are ready');
     is($server->_managed_connection_count, 3, 'server manages three live Connections');
     ok($server->_route_count >= 3, 'live Connections have CID routes');
 
@@ -416,13 +416,13 @@ subtest 'staggered multi-connection retirement' => sub {
             }
         }
 
-        last if !grep { !defined $_ } @server_for
-            && !grep { !$_->closed } @client_streams
-            && !grep { !$_->closed } values %server_stream_for;
+        last if !(grep { !defined $_ } @server_for)
+            && !(grep { !$_->closed } @client_streams)
+            && !(grep { !$_->closed } values %server_stream_for);
     }
 
-    ok(!grep { !defined $_ } @server_for, 'server Connections are matched to their clients');
-    ok(!grep { !$_->closed } @client_streams, 'all lifecycle streams close normally');
+    ok(!(grep { !defined $_ } @server_for), 'server Connections are matched to their clients');
+    ok(!(grep { !$_->closed } @client_streams), 'all lifecycle streams close normally');
 
     for my $connection (@accepted) {
         my $key = refaddr($connection);
@@ -507,8 +507,8 @@ subtest 'staggered multi-connection retirement' => sub {
     @accepted = ();
     @clients = ();
 
-    ok(!grep { defined $_ } @weak_clients, 'dropping client Endpoints destroys retired Connections');
-    ok(!grep { defined $_ } @weak_servers, 'retired server Connections have no hidden Endpoint ownership');
+    ok(!(grep { defined $_ } @weak_clients), 'dropping client Endpoints destroys retired Connections');
+    ok(!(grep { defined $_ } @weak_servers), 'retired server Connections have no hidden Endpoint ownership');
 
     my $weak_server = $server;
     weaken($weak_server);

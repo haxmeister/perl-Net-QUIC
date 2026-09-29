@@ -220,6 +220,7 @@ net_quic_capture_peer_close(net_quic_connection *ep)
 {
     const ngtcp2_ccerr *ccerr = ngtcp2_conn_get_ccerr(ep->conn);
     int type = NET_QUIC_CLOSE_INFO_TRANSPORT;
+    uint64_t code = ccerr->error_code;
 
     if (ccerr->type == NGTCP2_CCERR_TYPE_APPLICATION) {
         type = NET_QUIC_CLOSE_INFO_APPLICATION;
@@ -227,13 +228,21 @@ net_quic_capture_peer_close(net_quic_connection *ep)
         type = NET_QUIC_CLOSE_INFO_IDLE;
     } else if (ccerr->type == NGTCP2_CCERR_TYPE_DROP_CONN) {
         type = NET_QUIC_CLOSE_INFO_DROP;
+    } else if (ccerr->type == NGTCP2_CCERR_TYPE_TRANSPORT &&
+               code >= NGTCP2_CRYPTO_ERROR &&
+               code <= NGTCP2_CRYPTO_ERROR + 255) {
+        uint8_t alert = (uint8_t)(code - NGTCP2_CRYPTO_ERROR);
+        type = net_quic_tls_alert_is_certificate(alert)
+            ? NET_QUIC_CLOSE_INFO_CERTIFICATE
+            : NET_QUIC_CLOSE_INFO_TLS;
+        code = (uint64_t)alert;
     }
 
     net_quic_set_close_info(
         ep,
         type,
         NET_QUIC_CLOSE_INITIATOR_PEER,
-        ccerr->error_code,
+        code,
         ccerr->frame_type,
         0
     );

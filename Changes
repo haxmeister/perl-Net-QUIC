@@ -98,6 +98,15 @@ Revision history for Net-QUIC
       application send.
     - Test partial ACK-driven memory release while later chunks are still
       buffered, along with exact byte ordering and FIN behavior.
+    - Add Net::QUIC::Driver as the recommended event-loop adapter boundary.
+    - Reduce ordinary adapters to start, receive, timeout, and writable events
+      plus send and set_timeout callbacks.
+    - Keep Endpoint's four primitive integration methods as the low-level API.
+    - Move Endpoint output draining, backpressure pause/resume, and timeout
+      replacement rules into Driver so adapters do not reproduce them.
+    - Notify Driver automatically after application operations that can change
+      QUIC output state, including Stream send/finish/reset/data consumption and
+      Connection close.
 
 0.001_001  2026-09-27
     - Begin the Net::QUIC implementation.

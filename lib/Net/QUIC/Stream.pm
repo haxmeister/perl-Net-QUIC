@@ -176,7 +176,10 @@ stream.
 Queues bytes for reliable ordered delivery.
 
 The bytes are copied into Net::QUIC-owned memory and kept unchanged until
-ngtcp2 reports that they are acknowledged or the stream closes.
+ngtcp2 reports that they are acknowledged or the stream closes. Large sends are
+stored internally in fixed-size pieces so fully acknowledged earlier bytes can
+be released without waiting for the whole original C<send> call to be
+acknowledged.
 
 =head2 finish
 

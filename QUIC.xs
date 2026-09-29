@@ -248,6 +248,10 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv)
         callbacks.stream_open = net_quic_stream_open_cb;
         callbacks.stream_close = net_quic_stream_close_cb;
         callbacks.stream_reset = net_quic_stream_reset_cb;
+        callbacks.extend_max_local_streams_bidi =
+            net_quic_extend_max_local_streams_bidi_cb;
+        callbacks.extend_max_local_streams_uni =
+            net_quic_extend_max_local_streams_uni_cb;
         callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;

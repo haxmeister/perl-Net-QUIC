@@ -1,72 +1,133 @@
 # Net::QUIC handoff
 
-## Current branch
+## Current state
 
-feature/integration-driver
+Current branch:
+
+main
 
 Current main baseline:
 
-0e17aefd8df2bee6660d3faac83eca6eef597ff6
+46ef9dba2f7942f9703654aba6c9327b4f1900ca
 
-PR:
+PR #5, "Add generic event-loop integration driver", is merged.
 
-- #5 Add generic event-loop integration driver
+Merged Driver checkpoint:
 
-Validated code-bearing checkpoint:
-
-- head: fec6ce358ac43695a690e7ba05dd46faf8e4cf3c
-- GitHub Actions run: 36508276514
-- full 15-job matrix: PASS
-- 15 test files / 249 tests on Linux Perl 5.44
+- feature head: 8c830427ae68e97a2d91f7c60be53dca920292c3
+- merge commit: 46ef9dba2f7942f9703654aba6c9327b4f1900ca
+- GitHub Actions run 36508560351: 15/15 PASS
 - Linux Perl 5.20 through 5.44: PASS
 - macOS Perl 5.44: PASS
 - Windows Perl 5.44: PASS
+- 15 test files / 249 tests on Linux Perl 5.44
 
-Immediate branch scope is complete:
+Net::QUIC::Driver is now the recommended event-loop adapter boundary.
 
-- add Net::QUIC::Driver as the recommended event-loop adapter boundary
-- keep Net::QUIC::Endpoint as the low-level engine boundary
-- ordinary adapters report start, receive, timeout, and writable events
-- ordinary adapters provide send and set_timeout callbacks
-- Driver owns Endpoint output draining
-- Driver owns UDP backpressure pause/resume state
-- Driver refreshes or cancels the one-shot QUIC timeout after state changes
-- Driver automatically services application output from Connections obtained
-  through it
-- Stream send, finish, reset, and received-data consumption notify the Driver
-  after changing QUIC state
-- Connection close notifies the Driver after changing QUIC state
-- low-level Endpoint users remain unaffected
-- no event-loop dependency was added to Net::QUIC
-- no Linux::Event, IO::Async, EV, or other adapter was added to this
-  distribution
-
-The design goal is now explicit:
-
-    An adapter author should understand their event loop, not ngtcp2's
-    servicing rules.
-
-The recommended adapter contract is:
+Recommended adapter contract:
 
     $driver->start;
     $driver->receive($bytes, $local, $peer);
     $driver->timeout;
     $driver->writable;
 
-with:
+Adapter callbacks:
 
     send        => sub { ... }
     set_timeout => sub { ... }
 
-The low-level Endpoint contract remains available:
+Driver owns Endpoint output draining, UDP backpressure pause/resume state, and
+QUIC timeout replacement. Stream send, finish, reset, received-data consumption,
+and Connection close automatically notify the Driver when application work can
+change QUIC output.
+
+Net::QUIC::Endpoint remains the low-level integration boundary:
 
     receive_datagram
     next_datagram
     timeout_after
     handle_timeout
 
-This branch deliberately does not add a framework-specific adapter. Linux::Event,
-IO::Async, EV, and other integrations can all sit above the same Driver API.
+No event-loop-specific adapter is part of the distribution. Linux::Event,
+IO::Async, AnyEvent, EV, Mojolicious, and other event systems can integrate
+above Driver without changing Net::QUIC core.
+
+## Next completeness work
+
+Recommended sequence before treating the first public transport release as
+complete:
+
+1. Add a real UDP loopback Driver test.
+   - Use actual localhost UDP sockets rather than only in-memory datagram
+     exchange.
+   - Prove client -> kernel UDP -> server handshake -> stream request ->
+     response through Net::QUIC::Driver.
+
+2. Improve stream-limit semantics.
+   - Reaching the peer's temporary bidirectional or unidirectional stream limit
+     should not look like a broken connection.
+   - Decide the public behavior for "no stream available yet" and how the
+     application learns when another local stream may be opened.
+
+3. Finish the public error model.
+   - Make transport errors, application close errors, TLS/handshake failures,
+     remote stream resets, local failures, and normal close behavior
+     intentionally distinguishable.
+   - Avoid a large exception hierarchy unless it provides real value.
+
+4. Review transport defaults and public tuning.
+   - Current implementation uses sensible fixed defaults for flow-control and
+     stream limits.
+   - Decide which, if any, belong in public constructors.
+   - Do not expose ngtcp2 knobs merely because they exist.
+
+5. Add destructive lifecycle tests.
+   - Drop Driver, Endpoint, Connection, and Stream objects in different orders.
+   - Close while output is pending or backpressured.
+   - Exercise several server Connections closing at different times.
+   - Verify no stale CID routes, pending timers, or native stream state remain.
+
+6. Do the final documentation/API cleanup.
+   - Rewrite README/POD around the final simple model:
+       Driver -> Endpoint -> Connection -> Stream
+   - Make client/server examples copyable and clear.
+   - Add a small adapter-writing section.
+   - Keep handoff.md out of the CPAN distribution.
+
+7. Review exact local-address handling for wildcard-bound UDP sockets.
+   - Net::QUIC already accepts the correct neutral packed local sockaddr on
+     each received packet.
+   - Event-loop adapters bound to 0.0.0.0 or :: may eventually need packet-info
+     support such as IP_PKTINFO/IPV6_PKTINFO to report the exact destination
+     interface/address.
+   - This matters especially for multi-interface servers, migration, and more
+     advanced path handling.
+
+Advanced QUIC features that do not need to block the first transport release:
+
+- session resumption / 0-RTT
+- connection migration / path switching
+- unreliable QUIC DATAGRAM extension
+- qlog
+- ECN exposure
+- explicit PMTU controls
+- broad congestion-control or low-level transport tuning
+
+Keep HTTP/3 outside Net::QUIC transport for now.
+
+## Branch cleanup status
+
+After merging PR #5, every remaining feature branch was compared against main.
+All are zero commits ahead of main and contain no unique unmerged work.
+
+Safe to delete:
+
+- feature/connection-retirement
+- feature/fixed-size-transmit-chunks
+- feature/integration-driver
+- feature/shared-server-tls-context
+- feature/stateless-reset
+- feature/stream-state-reclamation
 
 ## Purpose
 

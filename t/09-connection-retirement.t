@@ -156,6 +156,15 @@ ok(
 
 $client->connection->close(42);
 ok(!$client->connection->closed, 'local close begins a closing period');
+is(
+    $client->connection->close_info,
+    {
+        type      => 'application',
+        initiator => 'local',
+        code      => 42,
+    },
+    'local application close is recorded',
+);
 
 my $close_datagram = $client->next_datagram;
 ok(defined($close_datagram), 'local close produces a CONNECTION_CLOSE datagram');
@@ -167,6 +176,15 @@ $server->receive_datagram(
 );
 
 ok(!$accepted->closed, 'peer close begins a draining period');
+is(
+    $accepted->close_info,
+    {
+        type      => 'application',
+        initiator => 'peer',
+        code      => 42,
+    },
+    'peer application close is recorded',
+);
 is(
     $server->_managed_connection_count,
     1,

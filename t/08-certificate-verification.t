@@ -44,7 +44,7 @@ sub run_handshake {
     my (%args) = @_;
 
     my $server = Net::QUIC::Endpoint->server(
-        alpn             => $alpn,
+        alpn             => defined($args{server_alpn}) ? $args{server_alpn} : $alpn,
         certificate_file => $cert_file,
         private_key_file => $key_file,
     );
@@ -52,7 +52,7 @@ sub run_handshake {
     my %client_args = (
         local       => $client_local,
         peer        => $server_local,
-        alpn        => $alpn,
+        alpn        => defined($args{client_alpn}) ? $args{client_alpn} : $alpn,
         server_name => $args{server_name},
     );
     $client_args{ca_file} = $args{ca_file}
@@ -103,7 +103,8 @@ sub run_handshake {
             && $server_connection->ready;
 
         return ($client, $server_connection, undef)
-            if defined $client->connection->close_info;
+            if defined $client->connection->close_info
+            || ($server_connection && defined $server_connection->close_info);
 
         my $server_after = $server->timeout_after;
         my $client_after = $client->timeout_after;
@@ -167,6 +168,22 @@ is(
     $wrong_name_client->connection->close_info->{type},
     'certificate',
     'wrong host name is reported as a certificate failure',
+);
+
+my ($alpn_client, $alpn_server, $alpn_error) = run_handshake(
+    server_name => 'localhost',
+    ca_file     => $cert_file,
+    client_alpn => 'client-only-protocol',
+    server_alpn => 'server-only-protocol',
+);
+
+ok(!defined($alpn_error), 'ALPN rejection does not escape as an exception');
+ok(!$alpn_client->connection->ready, 'ALPN mismatch client never becomes ready');
+ok($alpn_server && !$alpn_server->ready, 'ALPN mismatch server never becomes ready');
+is(
+    $alpn_server->close_info->{type},
+    'tls',
+    'non-certificate handshake alert is reported as TLS failure',
 );
 
 done_testing;

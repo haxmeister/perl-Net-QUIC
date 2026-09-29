@@ -68,6 +68,7 @@ sub send {
         if !$self->can_send;
 
     $self->{connection}->_stream_send($self->{id}, $bytes);
+    $self->{connection}->_notify_output;
     return;
 }
 
@@ -78,6 +79,7 @@ sub finish {
         if !$self->can_send;
 
     $self->{connection}->_stream_finish($self->{id});
+    $self->{connection}->_notify_output;
     return;
 }
 
@@ -90,6 +92,7 @@ sub next_data {
     my $event = $self->{connection}->_stream_take_data($self->{id});
     return if !defined $event;
 
+    $self->{connection}->_notify_output;
     return $event->[0];
 }
 
@@ -116,6 +119,7 @@ sub reset {
         if $app_error_code !~ /\A\d+\z/;
 
     $self->{connection}->_stream_reset($self->{id}, $app_error_code);
+    $self->{connection}->_notify_output;
     return;
 }
 
@@ -136,8 +140,10 @@ A C<send> call does not define a message boundary, and received bytes may be
 returned by C<next_data> in different-sized chunks. Applications that need
 messages must add their own framing.
 
-A stream does not own a socket. Data queued with C<send> becomes UDP datagrams
-when the surrounding L<Net::QUIC::Endpoint> is drained with C<next_datagram>.
+A stream does not own a socket. With the recommended L<Net::QUIC::Driver>
+integration, state-changing Stream operations automatically notify the Driver
+so any resulting UDP datagrams and timeout changes are serviced. Low-level
+Endpoint users can still drain L<Net::QUIC::Endpoint/next_datagram> directly.
 
 Stream objects keep their L<Net::QUIC::Connection> alive. Closed native stream
 state is kept while a Stream object still exists, so status and buffered receive
@@ -181,6 +187,10 @@ stored internally in fixed-size pieces so fully acknowledged earlier bytes can
 be released without waiting for the whole original C<send> call to be
 acknowledged.
 
+When this Stream belongs to a Connection obtained through
+L<Net::QUIC::Driver>, C<send> also wakes the Driver automatically. The
+application does not need a separate integration call.
+
 =head2 finish
 
     $stream->finish;
@@ -199,7 +209,9 @@ Returns the next received chunk, or undef when no received data is waiting.
 An empty string is a valid return value when the peer sends a FIN with no final
 data, so test the result with C<defined>.
 
-Reading a chunk gives its receive flow-control credit back to QUIC.
+Reading a chunk gives its receive flow-control credit back to QUIC. With a
+Driver integration, any protocol output made possible by returning that credit
+is serviced automatically.
 
 =head2 remote_finished
 

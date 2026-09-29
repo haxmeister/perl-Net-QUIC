@@ -32,9 +32,13 @@ The library is intentionally event-loop neutral. Net::QUIC owns QUIC and TLS
 protocol state. The application or integration layer owns UDP sockets,
 readiness notification, and scheduling.
 
-The first transport-facing API is L<Net::QUIC::Endpoint>. An event-loop
-integration feeds received UDP datagrams into an endpoint, sends the datagrams
-it produces, and schedules the timeout it requests.
+L<Net::QUIC::Driver> is the recommended event-loop integration API. An
+adapter reports UDP receive, timeout, and writable events to the Driver. The
+Driver sends complete UDP datagrams through an adapter callback and asks the
+adapter to replace one QUIC timeout.
+
+L<Net::QUIC::Endpoint> remains the low-level engine boundary for unusual
+integrations and tests.
 
 Net::QUIC uses Picotls for QUIC TLS. Alien::ngtcp2 supplies the tested
 ngtcp2 and Picotls build. Picotls uses the host OpenSSL installation underneath
@@ -66,21 +70,28 @@ QUIC TLS implementation. Application code should not need to branch on it.
 
 Net::QUIC does not choose an event loop.
 
-The integration contract is deliberately small:
+The recommended adapter contract is deliberately small:
+
+    UDP transport becomes ready
+        -> $driver->start
 
     UDP packet arrives
-        -> $endpoint->receive_datagram(...)
+        -> $driver->receive(...)
 
-    Net::QUIC has packets to send
-        -> $endpoint->next_datagram
+    Requested QUIC timeout fires
+        -> $driver->timeout
 
-    Net::QUIC needs a timer
-        -> $endpoint->timeout_after
+    UDP output recovers from backpressure
+        -> $driver->writable
 
-    Timer fires
-        -> $endpoint->handle_timeout
+The adapter supplies C<send> and C<set_timeout> callbacks. Driver owns Endpoint
+output draining, backpressure pause/resume state, and QUIC timeout updates.
 
-See L<Net::QUIC::Endpoint> for the complete cycle.
+Application calls that change QUIC output state are also serviced
+automatically when Connections are obtained through the Driver.
+
+See L<Net::QUIC::Driver> for the ordinary adapter API and
+L<Net::QUIC::Endpoint> for the lower-level primitives.
 
 =head1 STATUS
 
@@ -101,6 +112,8 @@ Stateless Reset without recreating Connection state; unknown long-header and
 undersized packets are dropped.
 
 =head1 SEE ALSO
+
+L<Net::QUIC::Driver>
 
 L<Net::QUIC::Endpoint>
 

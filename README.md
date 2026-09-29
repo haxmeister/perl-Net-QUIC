@@ -8,82 +8,134 @@ This repository is in early development.
 
 Net::QUIC owns QUIC and TLS protocol state.
 
-It does not own an event loop. It does not require Linux::Event, IO::Async, or
-another particular networking framework.
+It does not own an event loop. It does not require Linux::Event, IO::Async, EV,
+or another particular networking framework.
 
-The object split is:
+The recommended integration shape is:
 
 ```text
-Net::QUIC::Endpoint
+Net::QUIC::Driver
     |
-    +-- Net::QUIC::Connection
+    +-- Net::QUIC::Endpoint
             |
-            +-- Net::QUIC::Stream
+            +-- Net::QUIC::Connection
+                    |
+                    +-- Net::QUIC::Stream
 ```
 
-The endpoint is the event-loop and UDP boundary. A connection represents one
-QUIC connection and is where application-facing connection and stream behavior
-belongs.
-
-An integration layer owns:
+The integration layer still owns:
 
 - the UDP socket
 - readable and writable readiness
 - receiving and sending UDP datagrams
-- one timer
+- one replaceable one-shot timeout
+- the surrounding event loop
 
-Net::QUIC gives that integration four endpoint operations:
+The Driver owns the repetitive QUIC servicing rules. An adapter does not drain
+Endpoint output itself and does not calculate when Endpoint timers must be
+rearmed.
+
+The adapter supplies two callbacks:
+
+```perl
+send => sub {
+    my ($datagram) = @_;
+
+    # Send one complete UDP datagram.
+    # Return false only after accepting it when output is backpressured.
+},
+
+set_timeout => sub {
+    my ($seconds) = @_;
+
+    # Replace the current one-shot QUIC timeout.
+    # undef means cancel it.
+},
+```
+
+The adapter reports four simple events:
+
+```perl
+$driver->start;                         # UDP transport is ready
+$driver->receive($bytes, $local, $peer); # one UDP packet arrived
+$driver->timeout;                       # requested QUIC timeout fired
+$driver->writable;                      # UDP output recovered
+```
+
+The ordinary adapter has no QUIC output-drain loop.
+
+Conceptually:
+
+```perl
+sub udp_transport_ready {
+    $driver->start;
+}
+
+sub udp_packet_received {
+    my ($bytes, $local, $peer) = @_;
+    $driver->receive($bytes, $local, $peer);
+}
+
+sub quic_timeout_fired {
+    $driver->timeout;
+}
+
+sub udp_output_drained {
+    $driver->writable;
+}
+```
+
+Linux::Event can map those calls to Datagram readiness, Datagram receive/drain,
+and one Kernel::Timer. IO::Async can map them to its datagram and timer
+facilities. EV can map them to its I/O and timer watchers. Net::QUIC does not
+need framework-specific code.
+
+Application operations such as Stream `send`, `finish`, `reset`, receive
+flow-control consumption, and Connection `close` automatically notify the
+Driver when the Connection was obtained through it. Application code therefore
+does not need to remember a separate "service QUIC" step after ordinary QUIC
+operations.
+
+### Low-level Endpoint boundary
+
+`Net::QUIC::Endpoint` remains available for tests and unusual integrations that
+want direct control.
+
+Its low-level operations are:
 
 ```perl
 $endpoint->receive_datagram($bytes, $local, $peer);
-my $datagram = $endpoint->next_datagram;
-my $seconds  = $endpoint->timeout_after;
+
+while (my $datagram = $endpoint->next_datagram) {
+    ...
+}
+
+my $seconds = $endpoint->timeout_after;
 $endpoint->handle_timeout;
 ```
 
-That is the event-loop contract.
+Those primitives remain the implementation foundation below Driver. Ordinary
+adapter authors should normally use `Net::QUIC::Driver` instead.
 
-A framework adapter follows the same cycle regardless of the framework:
-
-```perl
-sub udp_readable {
-    my ($bytes, $local, $peer) = receive_udp_packet();
-
-    $endpoint->receive_datagram($bytes, $local, $peer);
-    pump_quic();
-}
-
-sub pump_quic {
-    while (my $datagram = $endpoint->next_datagram) {
-        send_udp_packet($datagram->data, $datagram->peer);
-    }
-
-    arm_timer($endpoint->timeout_after);
-}
-
-sub quic_timer_fired {
-    $endpoint->handle_timeout;
-    pump_quic();
-}
-```
-
-An IO::Async adapter replaces `receive_udp_packet`, `send_udp_packet`, and
-`arm_timer` with IO::Async operations. A Linux::Event adapter replaces them
-with Linux::Event operations. The Net::QUIC calls stay the same.
-
-## Client endpoint
+## Client integration
 
 ```perl
-use Net::QUIC::Endpoint;
+use Net::QUIC::Driver;
 
-my $endpoint = Net::QUIC::Endpoint->client(
+my $driver = Net::QUIC::Driver->client(
     local       => $packed_local_address,
     peer        => $packed_peer_address,
     alpn        => 'my-protocol',
     server_name => 'example.com',
+
+    send        => sub { ... },
+    set_timeout => sub { ... },
 );
 
-my $connection = $endpoint->connection;
+my $connection = $driver->connection;
+
+# Call this once the UDP transport is ready.
+$driver->start;
 ```
 
 The local and peer values are packed IPv4 or IPv6 socket addresses. The
@@ -96,20 +148,22 @@ or IP address in `server_name`. OpenSSL's default trust locations are used.
 For a private or test CA, add a PEM file with `ca_file`:
 
 ```perl
-my $endpoint = Net::QUIC::Endpoint->client(
+my $driver = Net::QUIC::Driver->client(
     local       => $packed_local_address,
     peer        => $packed_peer_address,
     alpn        => 'my-protocol',
     server_name => 'internal.example',
     ca_file     => '/path/to/private-ca.pem',
+    send        => sub { ... },
+    set_timeout => sub { ... },
 );
 ```
 
 There is no insecure skip-verification option.
 
-The endpoint builds real QUIC packets and maintains ngtcp2's expiry timer. The
-connection reports handshake readiness and can open bidirectional and
-unidirectional QUIC streams.
+The Driver uses an Endpoint internally to build real QUIC packets and maintain
+ngtcp2's expiry deadlines. The connection reports handshake readiness and can
+open bidirectional and unidirectional QUIC streams.
 
 ## Streams
 
@@ -139,9 +193,9 @@ QUIC streams carry ordered bytes, not messages. One `send` call is not
 guaranteed to become one `next_data` result. Applications that need messages
 must add their own framing.
 
-After `send`, `finish`, or `reset`, the surrounding integration uses the
-same endpoint cycle as before: drain `next_datagram` and rearm the endpoint
-timer.
+With a Driver integration, `send`, `finish`, `reset`, received-data
+consumption, and Connection `close` automatically wake the Driver when they
+change QUIC output state. No extra adapter or application call is required.
 
 Closed stream state remains available while the application still holds its
 `Net::QUIC::Stream` object. This keeps final status and unread buffered data
@@ -158,31 +212,35 @@ The first multi-connection server Endpoint and stateless server front door are
 implemented. Client certificate and hostname verification are enabled by
 default.
 
-## Server endpoint
+## Server integration
 
-A server uses the same UDP and timer boundary while routing more than one QUIC
+A server Driver uses the same adapter contract while routing more than one QUIC
 connection:
 
 ```perl
-my $endpoint = Net::QUIC::Endpoint->server(
+my $driver = Net::QUIC::Driver->server(
     alpn             => 'my-protocol',
     certificate_file => 'server-cert.pem',
     private_key_file => 'server-key.pem',
     validate_address => 1,
+
+    send        => sub { ... },
+    set_timeout => sub { ... },
 );
 
-$endpoint->receive_datagram($bytes, $local, $peer);
+$driver->start;
+$driver->receive($bytes, $local, $peer);
 
-while (my $connection = $endpoint->next_connection) {
+while (my $connection = $driver->next_connection) {
     # A new peer has created a Connection.
     # Check $connection->ready when handshake completion matters.
 }
 ```
 
-The integration still drains `next_datagram`, schedules
-`timeout_after`, and calls `handle_timeout` exactly as it does for a client
-endpoint. The server Endpoint chooses the right Connection from the QUIC
-destination connection ID and uses one aggregate timer for all Connections.
+Driver handles Endpoint output draining and timeout replacement exactly as it
+does for a client. The server Endpoint underneath chooses the right Connection
+from the QUIC destination connection ID and exposes one aggregate timeout for
+all Connections.
 
 Unsupported QUIC versions are answered with a stateless Version Negotiation
 packet. Setting `validate_address => 1` enables stateless Retry before a new

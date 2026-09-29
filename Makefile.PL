@@ -85,6 +85,10 @@ WriteMakefile(
                 file    => 'lib/Net/QUIC/Endpoint.pm',
                 version => MM->parse_version('lib/Net/QUIC/Endpoint.pm'),
             },
+            'Net::QUIC::Driver' => {
+                file    => 'lib/Net/QUIC/Driver.pm',
+                version => MM->parse_version('lib/Net/QUIC/Driver.pm'),
+            },
             'Net::QUIC::Stream' => {
                 file    => 'lib/Net/QUIC/Stream.pm',
                 version => MM->parse_version('lib/Net/QUIC/Stream.pm'),

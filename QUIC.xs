@@ -711,6 +711,28 @@ _stream_state_count(self)
     OUTPUT:
         RETVAL
 
+SV *
+_stream_tx_stats(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        av = newAV();
+        av_push(av, newSVuv((UV)net_quic_stream_tx_chunk_count(stream)));
+        av_push(av, newSVuv((UV)net_quic_stream_tx_buffered_bytes(stream)));
+        RETVAL = newRV_noinc((SV *)av);
+    OUTPUT:
+        RETVAL
+
 void
 _stream_send(self, stream_id_iv, data_sv)
     SV *self

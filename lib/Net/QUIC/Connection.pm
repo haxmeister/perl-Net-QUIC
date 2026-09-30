@@ -125,9 +125,8 @@ Application-facing connection and stream behavior belongs here. Ordinary UDP
 socket and timer integration is driven through L<Net::QUIC::Driver>.
 L<Net::QUIC::Endpoint> remains the lower-level transport boundary.
 
-The connection objects are currently created by
-L<Net::QUIC::Endpoint/client>. Direct construction is private while the API is
-still being built.
+Connection objects are created by L<Net::QUIC::Driver> or
+L<Net::QUIC::Endpoint>. Direct native construction is private.
 
 =head1 METHODS
 

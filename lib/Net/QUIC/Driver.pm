@@ -9,7 +9,7 @@ use Scalar::Util qw(weaken);
 use Net::QUIC ();
 use Net::QUIC::Endpoint ();
 
-our $VERSION = $Net::QUIC::VERSION;
+our $VERSION = '0.01';
 
 sub new {
     my ($class, %args) = @_;

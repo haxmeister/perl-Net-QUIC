@@ -121,6 +121,22 @@ deadline changes.
 Stream operations such as `send`, `finish`, `reset`, and `next_data`
 automatically notify Driver when more QUIC work may be needed.
 
+Driver handles transport servicing; it does not decide what your application
+should do. After `receive`, `timeout`, or `writable` returns, application
+code can inspect the Connection and Streams normally:
+
+```perl
+$driver->receive($bytes, $local, $peer);
+
+if ($connection->ready) {
+    while (my $stream = $connection->next_stream) {
+        ...
+    }
+}
+```
+
+The examples use this pattern through a small application-service callback.
+
 ## Event-loop examples
 
 The `examples/` directory contains complete client integrations for common

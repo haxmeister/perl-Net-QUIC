@@ -392,6 +392,15 @@ or C<server> instead.
 
 Receives one L<Net::QUIC::Datagram>.
 
+The Datagram contains one complete UDP packet:
+
+    $datagram->data     payload bytes
+    $datagram->peer     packed destination socket address
+    $datagram->local    packed local socket address chosen by QUIC
+
+The adapter should send C<data> as one UDP datagram to C<peer>. C<local>
+describes the local path associated with that packet.
+
 Return true when the adapter can immediately accept another datagram.
 
 Return false only after accepting this datagram when output has crossed the

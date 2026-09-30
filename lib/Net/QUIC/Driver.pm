@@ -333,6 +333,16 @@ bookkeeping around Endpoint.
 
 Creates a client L<Net::QUIC::Endpoint> and wraps it in a Driver.
 
+C<local> and C<peer> are packed IPv4 or IPv6 socket addresses for this UDP
+socket and the remote server.
+
+C<alpn> identifies the application protocol carried over QUIC. The client and
+server must use a compatible ALPN value.
+
+C<server_name> is the DNS name or IP address expected in the server
+certificate. It is used for certificate verification and does not have to be
+the same textual value used to obtain C<peer>.
+
 Endpoint options other than C<send> and C<set_timeout> are passed directly to
 L<Net::QUIC::Endpoint/client>.
 

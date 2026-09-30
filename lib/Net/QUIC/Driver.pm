@@ -308,6 +308,14 @@ output and deadline changes to be serviced automatically.
 If an adapter can provide UDP receive/send readiness and a one-shot timer, it
 usually has everything Driver needs.
 
+Driver methods return after the corresponding QUIC work has been serviced.
+The surrounding event callback can then inspect application state normally.
+For example, after C<receive> returns a client can check C<ready>, pull peer
+streams with C<next_stream>, and consume their data.
+
+Driver handles the transport bookkeeping; it does not impose an application
+dispatcher.
+
 =head1 DRIVER OR ENDPOINT?
 
 Use Driver for ordinary event-loop integration.

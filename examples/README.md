@@ -11,6 +11,7 @@ Install only the event system you want to try. For example:
 cpanm Linux::Event
 cpanm AnyEvent
 cpanm IO::Async
+cpanm Future::AsyncAwait
 cpanm Mojolicious
 cpanm EV
 ```
@@ -45,6 +46,9 @@ anyevent-client.pl
 
 io-async-client.pl
     IO::Async client integration using callback APIs.
+
+io-async-async-await-client.pl
+    IO::Async transport integration with a Future::AsyncAwait application.
 
 mojo-ioloop-client.pl
     Mojolicious / Mojo::IOLoop client integration.
@@ -101,6 +105,7 @@ Equivalent commands can be used with:
 ```text
 linux-event-client.pl
 io-async-client.pl
+io-async-async-await-client.pl
 mojo-ioloop-client.pl
 ev-client.pl
 ```
@@ -142,11 +147,39 @@ watcher and creating the new one requested by Driver.
 
 ## IO::Async
 
-The IO::Async example deliberately uses the callback-style Loop API. It does
-not require Future::AsyncAwait.
+There are two IO::Async examples because they show two useful application
+styles over the same Net::QUIC Driver contract.
 
-It maps UDP readiness through `watch_io` and the QUIC deadline through
-`watch_time` / `unwatch_time`.
+`io-async-client.pl` keeps both the transport integration and application
+logic callback-driven. It does not require Future::AsyncAwait.
+
+`io-async-async-await-client.pl` keeps the same callback-driven UDP and timer
+adapter, but turns QUIC state changes into IO::Async Futures. The application
+side can then use Future::AsyncAwait:
+
+```perl
+async sub run_client {
+    await wait_for_handshake();
+
+    my $stream = await open_bidi_stream();
+
+    $stream->send($message);
+    $stream->finish;
+
+    my $reply = await read_until_fin($stream);
+
+    $connection->close;
+    await wait_for_connection_close();
+
+    return $reply;
+}
+```
+
+This does not make Net::QUIC itself depend on Futures or async/await. It is
+only an application-layer style built on top of the same Driver events.
+
+Both examples map UDP readiness through `watch_io` and the QUIC deadline
+through `watch_time` / `unwatch_time`.
 
 ## Mojo::IOLoop
 

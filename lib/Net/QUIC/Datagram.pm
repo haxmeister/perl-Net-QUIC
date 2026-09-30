@@ -26,9 +26,12 @@ Net::QUIC::Datagram - UDP datagram produced by Net::QUIC
 
 =head1 DESCRIPTION
 
-A Net::QUIC::Datagram is returned by
-L<Net::QUIC::Endpoint/next_datagram>. It contains the UDP payload and the
-network path chosen by QUIC.
+A Net::QUIC::Datagram contains one complete UDP payload and the network path
+chosen by QUIC.
+
+L<Net::QUIC::Driver> passes these objects to its C<send> callback.
+
+Low-level L<Net::QUIC::Endpoint> users receive them from C<next_datagram>.
 
 =head1 METHODS
 

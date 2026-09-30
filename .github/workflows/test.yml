@@ -44,6 +44,81 @@ jobs:
       - name: Build and test
         run: cpanm --test-only --verbose .
 
+      - name: Check public POD
+        if: matrix.perl == '5.44'
+        run: |
+          podchecker lib/Net/QUIC.pm
+          podchecker lib/Net/QUIC/Driver.pm
+          podchecker lib/Net/QUIC/Endpoint.pm
+          podchecker lib/Net/QUIC/Connection.pm
+          podchecker lib/Net/QUIC/Stream.pm
+          podchecker lib/Net/QUIC/Datagram.pm
+
+      - name: Check event-loop examples
+        if: matrix.perl == '5.44'
+        run: |
+          cpanm --notest AnyEvent IO::Async Future::AsyncAwait Mojolicious EV Linux::Event
+          perl -Mblib -c examples/io-select-echo-server.pl
+          perl -Mblib -c examples/linux-event-client.pl
+          perl -Mblib -c examples/anyevent-client.pl
+          perl -Mblib -c examples/io-async-client.pl
+          perl -Mblib -c examples/io-async-async-await-client.pl
+          perl -Mblib -c examples/mojo-ioloop-client.pl
+          perl -Mblib -c examples/ev-client.pl
+
+      - name: Run event-loop example smoke tests
+        if: matrix.perl == '5.44'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          perl -Mblib examples/io-select-echo-server.pl \
+            127.0.0.1 4433 net-quic-example \
+            t/data/server-cert.pem t/data/server-key.pem \
+            >/tmp/net-quic-example-server.log 2>&1 &
+
+          server_pid=$!
+          trap 'status=$?; cat /tmp/net-quic-example-server.log || true; kill "$server_pid" 2>/dev/null || true; exit $status' EXIT
+
+          for attempt in {1..100}; do
+            if grep -q "QUIC echo server listening" /tmp/net-quic-example-server.log; then
+              break
+            fi
+
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/net-quic-example-server.log
+              exit 1
+            fi
+
+            sleep 0.1
+          done
+
+          grep -q "QUIC echo server listening" /tmp/net-quic-example-server.log
+
+          test "$(perl -Mblib examples/linux-event-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem linux-event)" = "linux-event"
+
+          test "$(perl -Mblib examples/anyevent-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem anyevent)" = "anyevent"
+
+          test "$(perl -Mblib examples/io-async-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem io-async)" = "io-async"
+
+          test "$(perl -Mblib examples/io-async-async-await-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem io-async-await)" = "io-async-await"
+
+          test "$(perl -Mblib examples/mojo-ioloop-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem mojo)" = "mojo"
+
+          test "$(perl -Mblib examples/ev-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem ev)" = "ev"
+
   portability:
     runs-on: ${{ matrix.os }}
     strategy:

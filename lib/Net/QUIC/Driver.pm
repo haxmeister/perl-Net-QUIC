@@ -269,12 +269,15 @@ Net::QUIC::Driver - simple event-loop integration for Net::QUIC
 
 =head1 DESCRIPTION
 
-Net::QUIC::Driver is the recommended boundary for an event-loop adapter.
+Net::QUIC::Driver is the recommended way to connect Net::QUIC to an event
+loop.
 
-L<Net::QUIC::Endpoint> remains the low-level QUIC engine boundary. Driver owns
-the repetitive integration rules around that Endpoint: drain all currently
-available QUIC datagrams, stop when the UDP transport reports backpressure, and
-replace the event-loop timeout whenever QUIC's next deadline changes.
+The event loop owns the UDP socket and one replaceable timer. Driver owns the
+QUIC servicing rules around those two things.
+
+L<Net::QUIC::Endpoint> remains the lower-level engine underneath Driver. Driver
+drains Endpoint output, stops when the UDP transport reports backpressure, and
+replaces the event-loop timeout whenever QUIC's next deadline changes.
 
 An adapter normally reports only four lifecycle events:
 
@@ -302,6 +305,27 @@ Connection is obtained through the Driver, Net::QUIC installs a private output
 notification so state-changing application operations can cause pending QUIC
 output and deadline changes to be serviced automatically.
 
+If an adapter can provide UDP receive/send readiness and a one-shot timer, it
+usually has everything Driver needs.
+
+Driver methods return after the corresponding QUIC work has been serviced.
+The surrounding event callback can then inspect application state normally.
+For example, after C<receive> returns a client can check C<ready>, pull peer
+streams with C<next_stream>, and consume their data.
+
+Driver handles the transport bookkeeping; it does not impose an application
+dispatcher.
+
+=head1 DRIVER OR ENDPOINT?
+
+Use Driver for ordinary event-loop integration.
+
+Use L<Net::QUIC::Endpoint> directly only when the integration deliberately
+wants to own QUIC output draining and timeout maintenance itself.
+
+Driver is not a second protocol layer. It is a small piece of integration
+bookkeeping around Endpoint.
+
 =head1 CONSTRUCTORS
 
 =head2 client
@@ -316,6 +340,16 @@ output and deadline changes to be serviced automatically.
     );
 
 Creates a client L<Net::QUIC::Endpoint> and wraps it in a Driver.
+
+C<local> and C<peer> are packed IPv4 or IPv6 socket addresses for this UDP
+socket and the remote server.
+
+C<alpn> identifies the application protocol carried over QUIC. The client and
+server must use a compatible ALPN value.
+
+C<server_name> is the DNS name or IP address expected in the server
+certificate. It is used for certificate verification and does not have to be
+the same textual value used to obtain C<peer>.
 
 Endpoint options other than C<send> and C<set_timeout> are passed directly to
 L<Net::QUIC::Endpoint/client>.
@@ -357,6 +391,15 @@ or C<server> instead.
     }
 
 Receives one L<Net::QUIC::Datagram>.
+
+The Datagram contains one complete UDP packet:
+
+    $datagram->data     payload bytes
+    $datagram->peer     packed destination socket address
+    $datagram->local    packed local socket address chosen by QUIC
+
+The adapter should send C<data> as one UDP datagram to C<peer>. C<local>
+describes the local path associated with that packet.
 
 Return true when the adapter can immediately accept another datagram.
 
@@ -460,5 +503,20 @@ deliberately wants direct control over:
     handle_timeout
 
 Driver is the simpler recommended API for ordinary event-loop adapters.
+
+=head1 EXAMPLES
+
+The distribution includes complete Driver integrations in F<examples/> for:
+
+    Linux::Event
+    AnyEvent
+    IO::Async
+    Mojo::IOLoop
+    EV
+
+F<examples/io-select-echo-server.pl> provides a small local QUIC echo server
+that can be used to run the client examples.
+
+See F<examples/README.md>.
 
 =cut

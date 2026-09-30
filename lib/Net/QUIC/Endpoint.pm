@@ -376,7 +376,7 @@ __END__
 
 =head1 NAME
 
-Net::QUIC::Endpoint - event-loop boundary for QUIC
+Net::QUIC::Endpoint - low-level QUIC transport boundary
 
 =head1 SYNOPSIS
 
@@ -399,11 +399,16 @@ Net::QUIC::Endpoint - event-loop boundary for QUIC
 
 =head1 DESCRIPTION
 
-Net::QUIC::Endpoint is the small boundary between QUIC and an event loop.
+Net::QUIC::Endpoint is the low-level boundary between QUIC and an event loop.
 
-An event-loop integration owns the UDP socket and its timer. The endpoint owns
-the transport-facing side of QUIC and gives the integration datagrams to send
-and a timeout to schedule.
+Most integrations should use L<Net::QUIC::Driver>, which owns Endpoint output
+draining, backpressure pause/resume, and timeout replacement.
+
+Direct Endpoint users own those rules themselves.
+
+The event-loop integration owns the UDP socket and its timer. Endpoint owns the
+transport-facing side of QUIC and gives the integration datagrams to send and
+a timeout to schedule.
 
 A QUIC connection is represented separately by L<Net::QUIC::Connection>.
 A client endpoint owns one connection. A server endpoint can manage several
@@ -517,9 +522,9 @@ and valid for 10 seconds. Net::QUIC creates the Connection only after the peer
 returns a valid token. A token replayed from a different peer address is
 rejected without creating connection state.
 
-This is still an early server API. Finished Connections are retired
-automatically after QUIC's closing or draining period, and all of their CID
-routes are removed from the Endpoint at the same time.
+Finished Connections are retired automatically after QUIC's closing or
+draining period, and all of their CID routes are removed from the Endpoint at
+the same time.
 
 Server certificate and private-key files are loaded once when the Endpoint is
 constructed. Accepted Connections create their own Picotls sessions from that

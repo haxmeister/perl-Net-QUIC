@@ -52,6 +52,11 @@ ok(
 my $vn = $vn_server->next_datagram;
 ok(defined($vn), 'unsupported version produces a stateless response');
 is(
+    $vn->local,
+    $server_local,
+    'Version Negotiation preserves the concrete local destination address',
+);
+is(
     unpack('N', substr($vn->data, 1, 4)),
     0,
     'stateless response is a Version Negotiation packet',
@@ -97,6 +102,11 @@ ok(
 
 my $retry = $server->next_datagram;
 ok(defined($retry), 'server answers first Initial with Retry');
+is(
+    $retry->local,
+    $server_local,
+    'Retry preserves the concrete local destination address',
+);
 
 $client->receive_datagram(
     $retry->data,
@@ -127,6 +137,11 @@ is(
     $invalid_token_response->peer,
     $wrong_client_local,
     'stateless rejection is addressed to the peer that used the bad token',
+);
+is(
+    $invalid_token_response->local,
+    $server_local,
+    'stateless rejection preserves the concrete local destination address',
 );
 
 $server->receive_datagram(

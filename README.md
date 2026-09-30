@@ -195,8 +195,11 @@ their own destination-address ancillary-data APIs.
 
 Net::QUIC deliberately does not implement those socket operations. The event
 loop or UDP adapter owns the socket. Net::QUIC rejects wildcard addresses at
-its receive boundary so an adapter cannot accidentally give ngtcp2 an
+its QUIC path boundary so an adapter cannot accidentally give ngtcp2 an
 incorrect network path.
+
+If an event system cannot report the destination address for a wildcard-bound
+socket, bind the QUIC socket to one concrete local address instead.
 
 ## Event-loop examples
 

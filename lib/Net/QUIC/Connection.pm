@@ -117,127 +117,50 @@ __END__
 
 Net::QUIC::Connection - one QUIC connection
 
-=head1 DESCRIPTION
+=head1 SYNOPSIS
 
-Net::QUIC::Connection represents one QUIC connection.
+A client Connection normally comes from L<Net::QUIC::Driver>:
 
-Application-facing connection and stream behavior belongs here. Ordinary UDP
-socket and timer integration is driven through L<Net::QUIC::Driver>.
-L<Net::QUIC::Endpoint> remains the lower-level transport boundary.
+    my $connection = $driver->connection;
 
-Connection objects are created by L<Net::QUIC::Driver> or
-L<Net::QUIC::Endpoint>. Direct native construction is private.
+Wait for the QUIC/TLS handshake:
 
-=head1 METHODS
+    return if !$connection->ready;
 
-=head2 open_bidi_stream
+Open a bidirectional stream:
 
     my $stream = $connection->open_bidi_stream;
 
-Opens a bidirectional stream and returns a L<Net::QUIC::Stream>.
+    if ($stream) {
+        $stream->send("hello");
+        $stream->finish;
+    }
 
-Returns undef when the peer's current bidirectional stream limit has been
-reached. This is normal QUIC flow control and does not mean the Connection has
-failed. Other failures still throw an exception.
-
-=head2 open_uni_stream
-
-    my $stream = $connection->open_uni_stream;
-
-Opens a local unidirectional stream. This side can send on the stream, but it
-does not receive application data on it.
-
-Returns undef when the peer's current unidirectional stream limit has been
-reached. Other failures still throw an exception.
-
-=head2 on_stream_available
-
-    $connection->on_stream_available(sub {
-        my ($connection, $type) = @_;
-
-        if ($type eq 'bidi') {
-            my $stream = $connection->open_bidi_stream;
-            ...
-        }
-    });
-
-Registers a callback for stream-limit recovery.
-
-The callback is useful after C<open_bidi_stream> or C<open_uni_stream> returns
-undef. It runs when the peer later raises that stream limit, and C<$type> is
-either C<bidi> or C<uni>.
-
-The callback runs outside ngtcp2's internal callback stack, so opening a stream
-from it is safe.
-
-Pass undef to remove the callback.
-
-=head2 next_stream
+Accept streams opened by the peer:
 
     while (my $stream = $connection->next_stream) {
         ...
     }
 
-Returns the next stream opened by the peer, or undef when there is no new
-incoming stream waiting.
-
-=head2 close
+Close the Connection normally:
 
     $connection->close;
-    $connection->close($application_error_code);
 
-Starts a normal QUIC application-level connection close.
+=head1 DESCRIPTION
 
-The application error code defaults to zero. Calling C<close> again while the
-connection is already closing is harmless.
+Net::QUIC::Connection represents one QUIC connection.
 
-C<close> does not immediately destroy the Connection object. QUIC keeps a
-closing or draining connection around for a short period so late packets are
-handled correctly. When the Connection belongs to a L<Net::QUIC::Driver>, the
-Driver automatically services the close packet and updates the required QUIC
-timeout.
+Application protocol code normally works with Connection and
+L<Net::QUIC::Stream>. UDP socket and timer integration normally stays in
+L<Net::QUIC::Driver>.
 
-=head2 close_info
+A client Driver owns one Connection. A server Driver can expose many
+Connections through C<next_connection>.
 
-    my $info = $connection->close_info;
+Connection objects are created by Driver or L<Net::QUIC::Endpoint>. Direct
+native construction is private.
 
-Returns undef while no connection close or failure has been recorded.
-
-Once a connection is closing or has failed, returns a small hash reference.
-The common fields are:
-
-    type       application, transport, tls, certificate,
-               handshake, idle, or drop
-
-    initiator  local or peer
-
-    code       the application, QUIC transport, or TLS alert code
-
-C<frame_type> is included when a peer transport close identifies the QUIC frame
-that caused the error. C<native_error> is included for failures detected by
-ngtcp2 locally.
-
-A normal application close uses C<type =E<gt> 'application'> and code zero.
-This means local and peer normal closes can be distinguished without treating
-either one as an exception.
-
-TLS certificate verification failures use C<type =E<gt> 'certificate'>.
-Other TLS failures use C<type =E<gt> 'tls'>. Handshake timeout uses
-C<type =E<gt> 'handshake'>.
-
-Local API misuse, invalid configuration, allocation failure, and internal
-implementation failures still throw exceptions instead of becoming
-C<close_info>. Those are local program/system failures rather than remote
-connection outcomes.
-
-=head2 closed
-
-    if ($connection->closed) {
-        ...
-    }
-
-Returns true after the connection has completely finished its QUIC closing or
-draining period and no longer needs network or timer service.
+=head1 HANDSHAKE READINESS
 
 =head2 ready
 
@@ -246,5 +169,208 @@ draining period and no longer needs network or timer service.
     }
 
 Returns true after the QUIC cryptographic handshake has completed.
+
+A server Connection may be returned before this becomes true.
+
+Application work that requires an established connection should wait for
+C<ready>.
+
+=head1 OPENING STREAMS
+
+=head2 open_bidi_stream
+
+    my $stream = $connection->open_bidi_stream;
+
+Opens a local bidirectional stream and returns a L<Net::QUIC::Stream>.
+
+Both endpoints can send application bytes on a bidirectional stream.
+
+Returns undef when the peer's current bidirectional stream limit has been
+reached.
+
+That is normal QUIC flow control. It does not mean the Connection failed.
+
+Other failures still throw an exception.
+
+=head2 open_uni_stream
+
+    my $stream = $connection->open_uni_stream;
+
+Opens a local unidirectional stream.
+
+This endpoint can send application bytes on the stream but cannot receive
+application bytes from it.
+
+Returns undef when the peer's current unidirectional stream limit has been
+reached.
+
+Other failures still throw an exception.
+
+=head2 on_stream_available
+
+    $connection->on_stream_available(sub {
+        my ($connection, $type) = @_;
+
+        return if $type ne 'bidi';
+
+        my $stream = $connection->open_bidi_stream;
+        return if !defined $stream;
+
+        ...
+    });
+
+Registers a callback for stream-limit recovery.
+
+Use it when C<open_bidi_stream> or C<open_uni_stream> returned undef and the
+application wants to continue when the peer later grants more stream credit.
+
+C<$type> is:
+
+    bidi
+
+or:
+
+    uni
+
+The callback runs outside ngtcp2's internal callback stack, so opening a stream
+from it is safe.
+
+Pass undef to remove the callback:
+
+    $connection->on_stream_available(undef);
+
+=head1 PEER-CREATED STREAMS
+
+=head2 next_stream
+
+    while (my $stream = $connection->next_stream) {
+        ...
+    }
+
+Returns the next stream opened by the peer, or undef when no new incoming
+stream is waiting.
+
+The returned object is a L<Net::QUIC::Stream>.
+
+=head1 CLOSING
+
+=head2 close
+
+    $connection->close;
+
+or:
+
+    $connection->close($application_error_code);
+
+Starts a normal QUIC application-level Connection close.
+
+The application error code defaults to zero.
+
+Calling C<close> again while the Connection is already closing is harmless.
+
+C<close> does not immediately destroy the object. QUIC has a closing/draining
+period during which late packets still need network and timer service.
+
+When the Connection belongs to a Driver, Driver automatically services the
+close packet and timeout changes.
+
+=head2 closed
+
+    if ($connection->closed) {
+        ...
+    }
+
+Returns true after the Connection has completely finished its QUIC closing or
+draining period and no longer needs network or timer service.
+
+C<close_info> can become available before C<closed> becomes true.
+
+=head1 CLOSE AND ERROR INFORMATION
+
+=head2 close_info
+
+    my $info = $connection->close_info;
+
+Returns undef while no Connection close or failure has been recorded.
+
+Once a close or failure is known, returns a small hash reference.
+
+The common fields are:
+
+    type
+    initiator
+    code
+
+C<type> is one of:
+
+    application
+    transport
+    tls
+    certificate
+    handshake
+    idle
+    drop
+
+C<initiator> is:
+
+    local
+
+or:
+
+    peer
+
+C<code> is the application error code, QUIC transport error code, or TLS alert
+code as appropriate.
+
+For example, a normal peer application close can be:
+
+    {
+        type      => 'application',
+        initiator => 'peer',
+        code      => 0,
+    }
+
+C<frame_type> is included when a peer transport close identifies the QUIC frame
+that caused the error.
+
+C<native_error> is included for failures detected locally by ngtcp2.
+
+TLS certificate verification failures use:
+
+    type => 'certificate'
+
+Other TLS failures use:
+
+    type => 'tls'
+
+Handshake timeout uses:
+
+    type => 'handshake'
+
+Local API misuse, invalid configuration, allocation failure, and internal
+implementation failures still throw Perl exceptions. Those are local
+programming or system failures rather than ordinary remote Connection
+outcomes.
+
+=head1 DRIVER NOTIFICATION
+
+Connections obtained through L<Net::QUIC::Driver> are privately connected back
+to that Driver.
+
+State-changing application calls such as stream send/finish/reset, data
+consumption, and Connection close can therefore cause QUIC output and timer
+changes to be serviced automatically.
+
+Application code does not need to call a separate pump or service method.
+
+=head1 SEE ALSO
+
+L<Net::QUIC>
+
+L<Net::QUIC::Driver>
+
+L<Net::QUIC::Stream>
+
+L<Net::QUIC::Endpoint>
 
 =cut

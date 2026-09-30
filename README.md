@@ -94,6 +94,20 @@ set_timeout => sub {
 },
 ```
 
+The `send` callback receives one complete `Net::QUIC::Datagram`.
+
+Its useful values are:
+
+```perl
+$datagram->data;     # complete UDP payload bytes
+$datagram->peer;     # packed destination socket address
+$datagram->local;    # packed local socket address chosen by QUIC
+```
+
+The adapter sends `data` as one UDP datagram to `peer`. `local` describes
+the local path associated with that packet and is useful to integrations that
+manage more than one local address.
+
 The event loop reports four events back to Driver:
 
 ```perl

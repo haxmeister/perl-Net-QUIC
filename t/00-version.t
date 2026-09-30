@@ -22,8 +22,10 @@ my @packages = qw(
 for my $package (@packages) {
     no strict 'refs';
 
+    my $version = ${$package . '::VERSION'};
+
     is(
-        ${package}::VERSION,
+        $version,
         $Net::QUIC::VERSION,
         "$package version matches Net::QUIC",
     );

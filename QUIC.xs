@@ -264,6 +264,30 @@ crypto_backend()
         RETVAL
 
 int
+_local_address_is_unspecified(local_sv)
+    SV *local_sv
+    PREINIT:
+        const char *local;
+        STRLEN locallen;
+        ngtcp2_sockaddr_union local_addr;
+        ngtcp2_socklen local_addrlen;
+    CODE:
+        local = SvPVbyte(local_sv, locallen);
+
+        if (net_quic_copy_sockaddr(
+                &local_addr,
+                &local_addrlen,
+                local,
+                locallen
+            ) != 0) {
+            croak("local must be a packed IPv4 or IPv6 socket address");
+        }
+
+        RETVAL = net_quic_sockaddr_is_unspecified(&local_addr) ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+int
 _crypto_self_test()
     PREINIT:
         uint8_t token[NGTCP2_STATELESS_RESET_TOKENLEN];

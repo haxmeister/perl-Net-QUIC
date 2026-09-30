@@ -151,6 +151,56 @@ if ($connection->ready) {
 
 The examples use this pattern through a small application-service callback.
 
+## Local addresses and wildcard UDP sockets
+
+The `local` address passed to Net::QUIC is part of the QUIC network path. It
+must be the concrete IPv4 or IPv6 address for that packet.
+
+These are not valid QUIC local paths:
+
+```text
+0.0.0.0
+::
+```
+
+They are wildcard bind addresses. They mean "accept traffic for any local
+address"; they do not identify the address on which one particular UDP packet
+arrived.
+
+A client normally avoids this issue by connecting its UDP socket first and
+using `getsockname` after the kernel has selected the concrete local address.
+
+A server may bind its UDP socket to a wildcard address, but its adapter must
+recover the actual destination address of every received packet and pass that
+packed address to:
+
+```perl
+$driver->receive($bytes, $local, $peer);
+```
+
+The adapter must also send each outbound Datagram using the local source address
+reported by:
+
+```perl
+$datagram->local;
+```
+
+For a socket bound to one concrete address, the socket already fixes the local
+path and no special source-address selection is normally needed.
+
+For a wildcard-bound socket this usually requires packet-info support. On
+Linux, IPv4 adapters can use `IP_PKTINFO` with `recvmsg` / `sendmsg`;
+IPv6 has the corresponding packet-info mechanism. Other operating systems have
+their own destination-address ancillary-data APIs.
+
+Net::QUIC deliberately does not implement those socket operations. The event
+loop or UDP adapter owns the socket. Net::QUIC rejects wildcard addresses at
+its QUIC path boundary so an adapter cannot accidentally give ngtcp2 an
+incorrect network path.
+
+If an event system cannot report the destination address for a wildcard-bound
+socket, bind the QUIC socket to one concrete local address instead.
+
 ## Event-loop examples
 
 The `examples/` directory contains complete client integrations for common

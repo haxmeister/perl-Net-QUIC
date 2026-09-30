@@ -76,6 +76,16 @@ sub _transport_config {
     ];
 }
 
+sub _require_concrete_local {
+    my ($class, $local) = @_;
+
+    croak "local must be a concrete IPv4 or IPv6 address; "
+        . "0.0.0.0 and :: are wildcard bind addresses, not QUIC paths"
+        if Net::QUIC::_local_address_is_unspecified($local);
+
+    return;
+}
+
 sub client {
     my ($class, %args) = @_;
 
@@ -86,6 +96,8 @@ sub client {
 
     croak "server_name cannot be empty"
         if $args{server_name} eq '';
+
+    $class->_require_concrete_local($args{local});
 
     my $ca_file = defined $args{ca_file}
         ? $args{ca_file}
@@ -335,6 +347,8 @@ sub next_connection {
 sub receive_datagram {
     my ($self, @args) = @_;
 
+    __PACKAGE__->_require_concrete_local($args[1]);
+
     return $self->_server_receive_datagram(@args)
         if $self->{mode} eq 'server';
 
@@ -430,6 +444,10 @@ For a client integration, the basic cycle is:
 The C<local> and C<peer> addresses are packed socket addresses such as those
 returned by Perl's L<Socket> functions or by the networking framework in use.
 They must be IPv4 or IPv6 addresses.
+
+C<local> must identify the concrete local endpoint for the packet. Wildcard
+bind addresses C<0.0.0.0> and C<::> are rejected because they do not identify
+a QUIC network path.
 
 =head1 METHODS
 
@@ -563,6 +581,15 @@ C<$connection-E<gt>ready> when the application needs handshake readiness.
     $endpoint->receive_datagram($bytes, $local, $peer);
 
 Feeds one received UDP datagram into QUIC.
+
+C<$local> must be the packed concrete destination address on which the packet
+arrived. It must not be C<0.0.0.0> or C<::>.
+
+If the UDP socket is bound to a wildcard address, the integration must use the
+platform's packet-info or destination-address mechanism to recover this value.
+The Endpoint intentionally does not own or inspect the UDP socket.
+
+C<$peer> is the packed address of the remote sender.
 
 =head2 next_datagram
 

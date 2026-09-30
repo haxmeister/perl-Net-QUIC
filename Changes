@@ -31,6 +31,12 @@ Unreleased
       application flow without changing the callback-based Driver integration.
     - Add a core IO::Select QUIC echo server for running the client examples.
     - Compile and run the event-loop examples in CI on the current Perl job.
+    - Require concrete local IPv4/IPv6 addresses at the QUIC path boundary;
+      reject wildcard bind addresses 0.0.0.0 and ::.
+    - Document packet-info/source-address requirements for wildcard-bound UDP
+      adapters and keep those OS-specific socket operations outside Net::QUIC.
+    - Make the simple IO::Select echo server reject wildcard binds rather than
+      demonstrating an incorrect QUIC path.
 
 0.001_002  2026-09-27
     - Require Alien::ngtcp2 0.03 and use its fixed Picotls QUIC TLS path.

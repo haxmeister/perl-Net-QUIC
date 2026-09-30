@@ -20,6 +20,10 @@ $alpn      = 'net-quic-example' if !defined $alpn;
 $cert_file = 't/data/server-cert.pem' if !defined $cert_file;
 $key_file  = 't/data/server-key.pem'  if !defined $key_file;
 
+die "this simple example requires a concrete bind address; "
+    . "wildcard QUIC servers need destination-address packet info\n"
+    if $host eq '0.0.0.0' || $host eq '::';
+
 die "certificate file not found: $cert_file\n" if !-f $cert_file;
 die "private key file not found: $key_file\n" if !-f $key_file;
 

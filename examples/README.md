@@ -80,6 +80,19 @@ perl examples/io-select-echo-server.pl \
 
 The test certificate is for `localhost`.
 
+This simple server example intentionally requires a concrete bind address such
+as `127.0.0.1`. It does not implement destination-address ancillary data for
+a wildcard bind.
+
+A production server may bind to `0.0.0.0` or `::`, but the UDP integration
+must then recover the concrete destination address of each received packet and
+pass that address as the Driver's `local` value. It must also preserve
+`$datagram->local` as the source address for outbound packets.
+
+On Linux, this is typically implemented with packet-info ancillary data and
+`recvmsg` / `sendmsg`. The exact socket API is deliberately outside
+Net::QUIC because the event loop owns UDP I/O.
+
 ## Running a client
 
 Each client accepts the same arguments:

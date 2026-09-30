@@ -41,7 +41,14 @@ Returns the UDP payload bytes.
 
 =head2 local
 
-Returns the packed local socket address for the datagram.
+Returns the packed concrete local source address for the datagram.
+
+An adapter using a socket bound to one concrete address normally gets this
+source address automatically from the socket.
+
+An adapter using a wildcard-bound socket must preserve this source address when
+transmitting the packet, using the platform's source-address selection
+mechanism.
 
 =head2 peer
 

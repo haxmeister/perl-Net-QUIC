@@ -92,6 +92,19 @@ boundaries.
 
 Net::QUIC is not HTTP/3 and is not a web framework.
 
+=head1 INSTALLATION
+
+Install from CPAN in the usual way:
+
+    cpanm Net::QUIC
+
+Net::QUIC uses L<Alien::ngtcp2> for its native QUIC and TLS dependencies. A
+normal installation does not require the application developer to separately
+configure ngtcp2.
+
+Event-loop modules shown in F<examples/> are optional integrations rather than
+Net::QUIC runtime dependencies.
+
 =head1 EVENT LOOP INTEGRATION
 
 Driver is the recommended integration layer.

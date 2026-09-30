@@ -145,24 +145,24 @@ watcher and creating the new one requested by Driver.
 The IO::Async example deliberately uses the callback-style Loop API. It does
 not require Future::AsyncAwait.
 
-It maps UDP readiness through C<watch_io> and the QUIC deadline through
-C<watch_time>/C<unwatch_time>.
+It maps UDP readiness through `watch_io` and the QUIC deadline through
+`watch_time` / `unwatch_time`.
 
 ## Mojo::IOLoop
 
-The Mojolicious example uses C<Mojo::IOLoop> and its reactor directly. The
+The Mojolicious example uses `Mojo::IOLoop` and its reactor directly. The
 reactor watches the UDP handle for reads, enables write readiness only during
-backpressure, and C<Mojo::IOLoop-E<gt>timer> supplies the one-shot QUIC timer.
+backpressure, and `Mojo::IOLoop->timer` supplies the one-shot QUIC timer.
 
 No Mojolicious web application or HTTP layer is involved.
 
 ## EV
 
-The EV example maps the Driver contract directly onto C<EV::io> and
-C<EV::timer> watchers.
+The EV example maps the Driver contract directly onto `EV::io` and
+`EV::timer` watchers.
 
 Like the other raw-socket examples, it keeps one unsent UDP datagram queued
-when the kernel would block and calls C<writable> after write readiness returns.
+when the kernel would block and calls `writable` after write readiness returns.
 
 ## Server examples in applications
 

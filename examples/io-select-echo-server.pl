@@ -10,6 +10,8 @@ use Time::HiRes qw(time);
 
 use Net::QUIC::Driver;
 
+$| = 1;
+
 my ($host, $port, $alpn, $cert_file, $key_file) = @ARGV;
 
 $host      = '127.0.0.1'      if !defined $host;

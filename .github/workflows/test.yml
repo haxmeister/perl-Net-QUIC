@@ -44,6 +44,17 @@ jobs:
       - name: Build and test
         run: cpanm --test-only --verbose .
 
+      - name: Check event-loop examples
+        if: matrix.perl == '5.44'
+        run: |
+          cpanm --notest AnyEvent IO::Async Mojolicious EV Linux::Event
+          perl -Mblib -c examples/io-select-echo-server.pl
+          perl -Mblib -c examples/linux-event-client.pl
+          perl -Mblib -c examples/anyevent-client.pl
+          perl -Mblib -c examples/io-async-client.pl
+          perl -Mblib -c examples/mojo-ioloop-client.pl
+          perl -Mblib -c examples/ev-client.pl
+
   portability:
     runs-on: ${{ matrix.os }}
     strategy:

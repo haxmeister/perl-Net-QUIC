@@ -44,6 +44,16 @@ jobs:
       - name: Build and test
         run: cpanm --test-only --verbose .
 
+      - name: Check public POD
+        if: matrix.perl == '5.44'
+        run: |
+          podchecker lib/Net/QUIC.pm
+          podchecker lib/Net/QUIC/Driver.pm
+          podchecker lib/Net/QUIC/Endpoint.pm
+          podchecker lib/Net/QUIC/Connection.pm
+          podchecker lib/Net/QUIC/Stream.pm
+          podchecker lib/Net/QUIC/Datagram.pm
+
       - name: Check event-loop examples
         if: matrix.perl == '5.44'
         run: |

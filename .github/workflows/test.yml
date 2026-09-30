@@ -119,6 +119,12 @@ jobs:
             127.0.0.1 4433 net-quic-example localhost \
             t/data/server-cert.pem ev)" = "ev"
 
+      - name: Build and test release distribution
+        if: matrix.perl == '5.44'
+        run: |
+          perl Makefile.PL
+          make disttest
+
   portability:
     runs-on: ${{ matrix.os }}
     strategy:

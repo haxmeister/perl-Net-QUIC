@@ -1,6 +1,7 @@
 Revision history for Net-QUIC
 
-Unreleased
+0.01  2026-09-29
+    - First stable CPAN release.
     - Add a real localhost UDP Driver loopback test using kernel UDP sockets.
     - Treat peer stream-limit exhaustion as normal flow control: open_bidi_stream
       and open_uni_stream now return undef instead of throwing when the current
@@ -37,6 +38,8 @@ Unreleased
       adapters and keep those OS-specific socket operations outside Net::QUIC.
     - Make the simple IO::Select echo server reject wildcard binds rather than
       demonstrating an incorrect QUIC path.
+    - Add missing_features.md to track the remaining canonical QUIC features
+      and standardized extensions not yet exposed by Net::QUIC.
 
 0.001_002  2026-09-27
     - Require Alien::ngtcp2 0.03 and use its fixed Picotls QUIC TLS path.

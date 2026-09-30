@@ -6,7 +6,7 @@ use warnings;
 use Carp qw(croak);
 use Net::QUIC ();
 
-our $VERSION = $Net::QUIC::VERSION;
+our $VERSION = '0.01';
 
 sub _new {
     my ($class, $connection, $id, $local_initiated, $bidirectional) = @_;

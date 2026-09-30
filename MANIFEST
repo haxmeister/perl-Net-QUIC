@@ -1,5 +1,5 @@
-.gitignore
 Changes
+examples/README.md
 examples/anyevent-client.pl
 examples/ev-client.pl
 examples/io-async-async-await-client.pl
@@ -7,7 +7,6 @@ examples/io-async-client.pl
 examples/io-select-echo-server.pl
 examples/linux-event-client.pl
 examples/mojo-ioloop-client.pl
-examples/README.md
 lib/Net/QUIC.pm
 lib/Net/QUIC/Connection.pm
 lib/Net/QUIC/Datagram.pm
@@ -16,13 +15,13 @@ lib/Net/QUIC/Endpoint.pm
 lib/Net/QUIC/Stream.pm
 LICENSE
 Makefile.PL
-MANIFEST			This list of files
+MANIFEST
 MANIFEST.SKIP
-Net-QUIC-0.001_002/META.json
-Net-QUIC-0.001_002/META.yml
+missing_features.md
 QUIC.xs
 README.md
 t/00-load.t
+t/00-version.t
 t/01-native.t
 t/02-endpoint.t
 t/03-handshake.t

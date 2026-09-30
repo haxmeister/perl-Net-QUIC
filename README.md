@@ -141,7 +141,25 @@ See `examples/README.md` for how to run them.
 
 ## A client connection
 
-A client Driver is created after the UDP socket addresses are known:
+A client Driver is created after the UDP socket addresses are known.
+
+The four values that identify the connection are straightforward:
+
+- `local` is this UDP socket's packed local address.
+- `peer` is the server's packed UDP address.
+- `alpn` names the application protocol carried over QUIC. Client and server
+  must use a compatible ALPN value.
+- `server_name` is the DNS name or IP address that the server certificate is
+  expected to represent. It is used for certificate verification.
+
+For example, a client can connect to the numeric peer address
+`192.0.2.20:4433` while using `server_name => 'service.example.com'` when
+that is the name on the server certificate.
+
+The packed addresses are the ordinary native socket-address values used by
+Perl's `Socket` APIs. Event-loop socket objects can often provide them
+directly.
+
 
 ```perl
 use Net::QUIC::Driver;

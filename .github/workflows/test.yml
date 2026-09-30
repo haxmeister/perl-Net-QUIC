@@ -57,11 +57,12 @@ jobs:
       - name: Check event-loop examples
         if: matrix.perl == '5.44'
         run: |
-          cpanm --notest AnyEvent IO::Async Mojolicious EV Linux::Event
+          cpanm --notest AnyEvent IO::Async Future::AsyncAwait Mojolicious EV Linux::Event
           perl -Mblib -c examples/io-select-echo-server.pl
           perl -Mblib -c examples/linux-event-client.pl
           perl -Mblib -c examples/anyevent-client.pl
           perl -Mblib -c examples/io-async-client.pl
+          perl -Mblib -c examples/io-async-async-await-client.pl
           perl -Mblib -c examples/mojo-ioloop-client.pl
           perl -Mblib -c examples/ev-client.pl
 
@@ -105,6 +106,10 @@ jobs:
           test "$(perl -Mblib examples/io-async-client.pl \
             127.0.0.1 4433 net-quic-example localhost \
             t/data/server-cert.pem io-async)" = "io-async"
+
+          test "$(perl -Mblib examples/io-async-async-await-client.pl \
+            127.0.0.1 4433 net-quic-example localhost \
+            t/data/server-cert.pem io-async-await)" = "io-async-await"
 
           test "$(perl -Mblib examples/mojo-ioloop-client.pl \
             127.0.0.1 4433 net-quic-example localhost \

@@ -132,10 +132,37 @@ The Linux::Event example is shorter because
 `Linux::Event::IO::Sock::Dgram` already provides packet queues,
 backpressure, `on_drain`, packed addresses, and timer integration.
 
+## AnyEvent
+
+The AnyEvent example uses an I/O watcher for UDP reads, a second watcher only
+while UDP output is backpressured, and one replaceable timer watcher for QUIC.
+
+Replacing the QUIC timer is simply a matter of dropping the previous timer
+watcher and creating the new one requested by Driver.
+
 ## IO::Async
 
 The IO::Async example deliberately uses the callback-style Loop API. It does
 not require Future::AsyncAwait.
+
+It maps UDP readiness through C<watch_io> and the QUIC deadline through
+C<watch_time>/C<unwatch_time>.
+
+## Mojo::IOLoop
+
+The Mojolicious example uses C<Mojo::IOLoop> and its reactor directly. The
+reactor watches the UDP handle for reads, enables write readiness only during
+backpressure, and C<Mojo::IOLoop-E<gt>timer> supplies the one-shot QUIC timer.
+
+No Mojolicious web application or HTTP layer is involved.
+
+## EV
+
+The EV example maps the Driver contract directly onto C<EV::io> and
+C<EV::timer> watchers.
+
+Like the other raw-socket examples, it keeps one unsent UDP datagram queued
+when the kernel would block and calls C<writable> after write readiness returns.
 
 ## Server examples in applications
 

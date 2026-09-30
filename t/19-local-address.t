@@ -53,8 +53,8 @@ like(
     'server receive rejects an IPv4 wildcard local path',
 );
 
-lives(
-    sub {
+ok(
+    !dies {
         $server->receive_datagram(
             "not a QUIC packet",
             $loopback_v4,
@@ -116,8 +116,8 @@ SKIP: {
         'client rejects an IPv6 wildcard as its QUIC local path',
     );
 
-    lives(
-        sub {
+    ok(
+        !dies {
             my $ipv6_server = Net::QUIC::Endpoint->server(
                 alpn             => 'local-address-test',
                 certificate_file => $cert_file,

@@ -399,7 +399,15 @@ The Datagram contains one complete UDP packet:
     $datagram->local    packed local socket address chosen by QUIC
 
 The adapter should send C<data> as one UDP datagram to C<peer>. C<local>
-describes the local path associated with that packet.
+is the concrete local source address associated with that QUIC path.
+
+For a socket bound to one concrete local address, the socket normally already
+selects that source address.
+
+For a wildcard-bound socket, the adapter must explicitly preserve the
+Datagram's C<local> source address when transmitting. The mechanism is
+platform-specific; for example, Linux IPv4 can use packet information with
+C<sendmsg>.
 
 Return true when the adapter can immediately accept another datagram.
 
@@ -441,6 +449,17 @@ C<start> is idempotent.
     $driver->receive($bytes, $local, $peer);
 
 Report one received UDP datagram.
+
+C<$local> must be the packed concrete destination address on which this packet
+was received. C<0.0.0.0> and C<::> are wildcard bind addresses and are not
+valid QUIC paths.
+
+A socket bound to a wildcard address therefore needs destination-address packet
+information from the operating system. On Linux IPv4 this can be obtained with
+C<IP_PKTINFO> and C<recvmsg>. The equivalent mechanism for other address
+families or operating systems belongs in the UDP adapter.
+
+C<$peer> is the packed address of the remote sender.
 
 Driver gives the packet to the Endpoint, sends any datagrams QUIC produces, and
 updates the requested timeout.

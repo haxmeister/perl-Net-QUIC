@@ -67,7 +67,7 @@ jobs:
             >/tmp/net-quic-example-server.log 2>&1 &
 
           server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          trap 'status=$?; cat /tmp/net-quic-example-server.log || true; kill "$server_pid" 2>/dev/null || true; exit $status' EXIT
 
           for attempt in {1..100}; do
             if grep -q "QUIC echo server listening" /tmp/net-quic-example-server.log; then

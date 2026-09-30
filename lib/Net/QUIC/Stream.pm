@@ -136,37 +136,86 @@ __END__
 
 Net::QUIC::Stream - one QUIC byte stream
 
+=head1 SYNOPSIS
+
+Send bytes:
+
+    $stream->send("hello");
+    $stream->finish;
+
+Read bytes:
+
+    while (defined(my $bytes = $stream->next_data)) {
+        handle_bytes($bytes);
+    }
+
+Check for a clean peer FIN:
+
+    if ($stream->remote_finished) {
+        ...
+    }
+
+Abort the stream:
+
+    $stream->reset($application_error_code);
+
 =head1 DESCRIPTION
 
 Net::QUIC::Stream represents one QUIC byte stream.
 
-QUIC stream data is an ordered sequence of bytes, not a sequence of messages.
-A C<send> call does not define a message boundary, and received bytes may be
-returned by C<next_data> in different-sized chunks. Applications that need
-messages must add their own framing.
+A QUIC stream is an ordered sequence of bytes.
 
-A stream does not own a socket. With the recommended L<Net::QUIC::Driver>
-integration, state-changing Stream operations automatically notify the Driver
-so any resulting UDP datagrams and timeout changes are serviced. Low-level
-Endpoint users can still drain L<Net::QUIC::Endpoint/next_datagram> directly.
+It is not a sequence of application messages.
 
-Stream objects keep their L<Net::QUIC::Connection> alive. Closed native stream
-state is kept while a Stream object still exists, so status and buffered receive
-data remain available after QUIC closes the stream. Once the stream is closed
-and no Stream object or pending incoming-stream queue entry needs that state,
-Net::QUIC releases it.
+One call to:
+
+    $stream->send($message);
+
+does not guarantee one matching C<next_data> result on the peer.
+
+Applications that need message boundaries should add their own framing above
+the QUIC stream.
+
+A Stream does not own a socket. UDP and timer integration normally stays in
+L<Net::QUIC::Driver>.
+
+=head1 STREAM DIRECTION
+
+A bidirectional stream allows both endpoints to send.
+
+A unidirectional stream allows only its creator to send application bytes.
+
+Use:
+
+    $stream->can_send
+
+and:
+
+    $stream->can_receive
+
+when code needs to handle either kind.
 
 =head1 METHODS
 
 =head2 id
 
+    my $id = $stream->id;
+
 Returns the QUIC stream ID.
 
 =head2 local_initiated
 
+    if ($stream->local_initiated) {
+        ...
+    }
+
 Returns true when this endpoint opened the stream.
 
 =head2 bidirectional
+
+    if ($stream->bidirectional) {
+        ...
+    }
 
 Returns true for a bidirectional stream and false for a unidirectional stream.
 
@@ -186,22 +235,30 @@ stream.
 
 Queues bytes for reliable ordered delivery.
 
-The bytes are copied into Net::QUIC-owned memory and kept unchanged until
-ngtcp2 reports that they are acknowledged or the stream closes. Large sends are
-stored internally in fixed-size pieces so fully acknowledged earlier bytes can
-be released without waiting for the whole original C<send> call to be
-acknowledged.
+The bytes are copied into Net::QUIC-owned memory.
 
-When this Stream belongs to a Connection obtained through
-L<Net::QUIC::Driver>, C<send> also wakes the Driver automatically. The
-application does not need a separate integration call.
+Large sends are stored internally in fixed-size pieces so fully acknowledged
+earlier bytes can be released without keeping the entire original send
+allocation alive.
+
+When this Stream belongs to a Connection obtained through Driver, C<send>
+automatically notifies Driver that QUIC may have new output.
+
+No extra integration call is required.
 
 =head2 finish
 
     $stream->finish;
 
-Closes the local send side cleanly after all bytes already queued with C<send>.
-This sends QUIC FIN. It does not discard queued data.
+Closes the local send side cleanly after all bytes already queued with
+C<send>.
+
+This sends QUIC FIN.
+
+It does not discard queued data.
+
+On a bidirectional stream, the peer may continue sending bytes back after this
+endpoint calls C<finish>.
 
 =head2 next_data
 
@@ -209,41 +266,75 @@ This sends QUIC FIN. It does not discard queued data.
         ...
     }
 
-Returns the next received chunk, or undef when no received data is waiting.
+Returns the next received chunk, or undef when no received data is currently
+waiting.
 
-An empty string is a valid return value when the peer sends a FIN with no final
-data, so test the result with C<defined>.
+Always test with C<defined>.
 
-Reading a chunk gives its receive flow-control credit back to QUIC. With a
-Driver integration, any protocol output made possible by returning that credit
-is serviced automatically.
+Reading data returns its receive flow-control credit to QUIC. With a Driver
+integration, any protocol output made possible by that credit is serviced
+automatically.
 
 =head2 remote_finished
 
 Returns true after a clean FIN has been received from the peer.
 
+This means the peer has finished its send side.
+
 =head2 reset
+
+    $stream->reset;
+
+or:
 
     $stream->reset($application_error_code);
 
-Aborts the stream with a QUIC application error code. The code defaults to
-zero when omitted.
+Aborts the local stream send side with a QUIC application error code.
+
+The code defaults to zero.
 
 =head2 remote_reset_code
+
+    my $code = $stream->remote_reset_code;
 
 Returns the application error code when the peer reset the stream, or undef if
 no peer reset has been received.
 
 =head2 local_reset_code
 
-Returns the application error code passed to C<reset> on this side, or undef if
-this side has not reset the stream.
+    my $code = $stream->local_reset_code;
 
-This is separate from C<remote_reset_code> so an application can distinguish a
-peer reset from its own local reset without inspecting exception text.
+Returns the application error code passed to C<reset> on this endpoint, or
+undef if this endpoint has not reset the stream.
+
+Keeping local and remote reset codes separate makes the reset direction
+unambiguous.
 
 =head2 closed
 
 Returns true after ngtcp2 reports that the stream is fully closed.
+
+=head1 OBJECT LIFETIME
+
+A Stream object keeps its L<Net::QUIC::Connection> alive.
+
+Closed native stream state remains available while a Stream object still needs
+it. This keeps final status and unread buffered receive data usable after QUIC
+closes the stream.
+
+Once the native stream is closed and no public Stream object or pending
+incoming-stream queue entry needs it, Net::QUIC reclaims that state.
+
+Dropping a Stream object before native close does not discard already queued
+transmit data. Net::QUIC keeps the native stream state until QUIC can finish or
+close it.
+
+=head1 SEE ALSO
+
+L<Net::QUIC>
+
+L<Net::QUIC::Connection>
+
+L<Net::QUIC::Driver>
 
 =cut

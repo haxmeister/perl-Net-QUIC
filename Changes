@@ -1,5 +1,35 @@
 Revision history for Net-QUIC
 
+Unreleased
+    - Add a real localhost UDP Driver loopback test using kernel UDP sockets.
+    - Treat peer stream-limit exhaustion as normal flow control: open_bidi_stream
+      and open_uni_stream now return undef instead of throwing when the current
+      peer limit is exhausted.
+    - Add Connection->on_stream_available for bidi/uni stream-credit recovery.
+    - Replenish peer MAX_STREAMS credit when peer-opened streams close.
+    - Add Connection->close_info with structured application, transport, TLS,
+      certificate, handshake, idle, and drop outcomes.
+    - Keep local programming/configuration/internal failures as Perl exceptions.
+    - Send the proper QUIC CONNECTION_CLOSE for locally detected protocol and
+      TLS failures when the connection state permits it.
+    - Add Stream->local_reset_code alongside remote_reset_code.
+    - Make transport policy explicit with the optional transport hash.
+    - Default to a 10 second handshake timeout, 30 second idle timeout, 1 MiB
+      connection receive window, 256 KiB stream receive window, and 100 initial
+      bidi/uni peer streams.
+    - Advertise active migration as disabled until migration support is
+      implemented and tested.
+    - Add destructive lifecycle coverage for Driver, Endpoint, Connection, and
+      Stream destruction order, Driver backpressure during close, staggered
+      multi-connection retirement, CID cleanup, timer cleanup, and native stream
+      cleanup.
+    - Rewrite README and top-level POD around the simpler public model:
+      Driver -> Connection -> Stream, with Endpoint documented as the low-level
+      escape hatch.
+    - Add examples for Linux::Event, AnyEvent, IO::Async, Mojo::IOLoop, and EV.
+    - Add a core IO::Select QUIC echo server for running the client examples.
+    - Compile and run the event-loop examples in CI on the current Perl job.
+
 0.001_002  2026-09-27
     - Require Alien::ngtcp2 0.03 and use its fixed Picotls QUIC TLS path.
     - Remove the OpenSSL, GnuTLS, BoringSSL, and wolfSSL backend branches.

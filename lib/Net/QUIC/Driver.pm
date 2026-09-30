@@ -269,12 +269,15 @@ Net::QUIC::Driver - simple event-loop integration for Net::QUIC
 
 =head1 DESCRIPTION
 
-Net::QUIC::Driver is the recommended boundary for an event-loop adapter.
+Net::QUIC::Driver is the recommended way to connect Net::QUIC to an event
+loop.
 
-L<Net::QUIC::Endpoint> remains the low-level QUIC engine boundary. Driver owns
-the repetitive integration rules around that Endpoint: drain all currently
-available QUIC datagrams, stop when the UDP transport reports backpressure, and
-replace the event-loop timeout whenever QUIC's next deadline changes.
+The event loop owns the UDP socket and one replaceable timer. Driver owns the
+QUIC servicing rules around those two things.
+
+L<Net::QUIC::Endpoint> remains the lower-level engine underneath Driver. Driver
+drains Endpoint output, stops when the UDP transport reports backpressure, and
+replaces the event-loop timeout whenever QUIC's next deadline changes.
 
 An adapter normally reports only four lifecycle events:
 
@@ -301,6 +304,19 @@ Application stream operations do not require a separate Driver call. When a
 Connection is obtained through the Driver, Net::QUIC installs a private output
 notification so state-changing application operations can cause pending QUIC
 output and deadline changes to be serviced automatically.
+
+If an adapter can provide UDP receive/send readiness and a one-shot timer, it
+usually has everything Driver needs.
+
+=head1 DRIVER OR ENDPOINT?
+
+Use Driver for ordinary event-loop integration.
+
+Use L<Net::QUIC::Endpoint> directly only when the integration deliberately
+wants to own QUIC output draining and timeout maintenance itself.
+
+Driver is not a second protocol layer. It is a small piece of integration
+bookkeeping around Endpoint.
 
 =head1 CONSTRUCTORS
 
@@ -460,5 +476,20 @@ deliberately wants direct control over:
     handle_timeout
 
 Driver is the simpler recommended API for ordinary event-loop adapters.
+
+=head1 EXAMPLES
+
+The distribution includes complete Driver integrations in F<examples/> for:
+
+    Linux::Event
+    AnyEvent
+    IO::Async
+    Mojo::IOLoop
+    EV
+
+F<examples/io-select-echo-server.pl> provides a small local QUIC echo server
+that can be used to run the client examples.
+
+See F<examples/README.md>.
 
 =cut

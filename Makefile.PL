@@ -51,14 +51,21 @@ WriteMakefile(
     },
 
     PREREQ_PM => {
-        'Alien::ngtcp2' => '0.03',
-        'Carp'          => 0,
-        'XSLoader'      => 0,
+        'Alien::ngtcp2'        => '0.03',
+        'Carp'                 => 0,
+        'Hash::Util::FieldHash' => 0,
+        'Scalar::Util'         => 0,
+        'XSLoader'             => 0,
     },
 
     TEST_REQUIRES => {
-        'Test2::V0'    => 0,
-        'Time::HiRes'  => 0,
+        'File::Temp'       => 0,
+        'FindBin'          => 0,
+        'IO::Select'       => 0,
+        'IO::Socket::INET' => 0,
+        'Socket'           => 0,
+        'Test2::V0'        => 0,
+        'Time::HiRes'      => 0,
     },
 
     INC    => $cflags,

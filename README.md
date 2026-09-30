@@ -20,6 +20,21 @@ Your event loop still owns the UDP socket.
 Net::QUIC is not HTTP/3, a web framework, or an application message protocol.
 QUIC streams carry ordered bytes. Applications decide what those bytes mean.
 
+## Installation
+
+From CPAN:
+
+```text
+cpanm Net::QUIC
+```
+
+Net::QUIC uses `Alien::ngtcp2` for its native QUIC and TLS dependencies.
+A normal Net::QUIC install does not require you to separately find or configure
+ngtcp2.
+
+The event-loop modules shown in `examples/` are optional. Net::QUIC itself
+does not require Linux::Event, AnyEvent, IO::Async, Mojolicious, or EV.
+
 ## Start here
 
 Most applications only need to understand three objects:

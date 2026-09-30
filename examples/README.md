@@ -2,6 +2,9 @@
 
 These examples show how Net::QUIC fits into common Perl event systems.
 
+The event-loop modules used here are optional example dependencies. Net::QUIC
+does not require Linux::Event, AnyEvent, IO::Async, Mojolicious, or EV.
+
 The important part is that every event loop implements the same small
 Net::QUIC::Driver contract:
 

@@ -143,6 +143,16 @@ new QUIC output.
 
 There is no ordinary application-visible QUIC pump loop.
 
+The packed C<local> address passed with a received UDP packet is part of the
+QUIC network path. It must be the concrete local destination address, not a
+wildcard bind address such as C<0.0.0.0> or C<::>.
+
+A wildcard-bound UDP adapter must therefore recover the packet's actual local
+destination address with the operating system's packet-info mechanism and
+preserve the selected local source address when sending Net::QUIC Datagrams.
+
+Net::QUIC leaves these socket operations to the event-loop adapter.
+
 See L<Net::QUIC::Driver> for the full contract.
 
 =head1 CONNECTIONS AND STREAMS

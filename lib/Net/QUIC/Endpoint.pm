@@ -445,6 +445,10 @@ The C<local> and C<peer> addresses are packed socket addresses such as those
 returned by Perl's L<Socket> functions or by the networking framework in use.
 They must be IPv4 or IPv6 addresses.
 
+C<local> must identify the concrete local endpoint for the packet. Wildcard
+bind addresses C<0.0.0.0> and C<::> are rejected because they do not identify
+a QUIC network path.
+
 =head1 METHODS
 
 =head2 client
@@ -577,6 +581,15 @@ C<$connection-E<gt>ready> when the application needs handshake readiness.
     $endpoint->receive_datagram($bytes, $local, $peer);
 
 Feeds one received UDP datagram into QUIC.
+
+C<$local> must be the packed concrete destination address on which the packet
+arrived. It must not be C<0.0.0.0> or C<::>.
+
+If the UDP socket is bound to a wildcard address, the integration must use the
+platform's packet-info or destination-address mechanism to recover this value.
+The Endpoint intentionally does not own or inspect the UDP socket.
+
+C<$peer> is the packed address of the remote sender.
 
 =head2 next_datagram
 

@@ -175,7 +175,7 @@ while ($running) {
         $wait,
     );
 
-    if (@$read_ready) {
+    if ($read_ready && @$read_ready) {
         my $bytes = '';
         my $peer = recv($socket, $bytes, 65_535, 0);
 
@@ -190,7 +190,7 @@ while ($running) {
         }
     }
 
-    if (@$write_ready && flush_udp()) {
+    if ($write_ready && @$write_ready && flush_udp()) {
         $driver->writable;
     }
 

@@ -1,3 +1,4 @@
+^\.gitignore$
 ^\.git/
 ^\.github/
 ^blib/
@@ -10,3 +11,4 @@
 ^Net-QUIC-.*\.tar\.gz$
 ^cover_db/
 ^handoff\.md$
+^Net-QUIC-[^/]+/

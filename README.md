@@ -160,12 +160,18 @@ Perl event systems:
 examples/linux-event-client.pl
 examples/anyevent-client.pl
 examples/io-async-client.pl
+examples/io-async-async-await-client.pl
 examples/mojo-ioloop-client.pl
 examples/ev-client.pl
 ```
 
 They all implement the same Driver contract so the event-loop-specific part is
 easy to compare.
+
+The two IO::Async examples deliberately show both styles: one keeps the
+application callback-driven, while the other uses Future::AsyncAwait so the
+application flow can be written sequentially without changing the Net::QUIC
+Driver API.
 
 See `examples/README.md` for how to run them.
 

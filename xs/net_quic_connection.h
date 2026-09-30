@@ -501,6 +501,33 @@ net_quic_copy_sockaddr(
 }
 
 static int
+net_quic_sockaddr_is_unspecified(
+    const ngtcp2_sockaddr_union *addr
+)
+{
+    const uint8_t *p;
+    size_t i;
+
+    if (addr->sa.sa_family == NGTCP2_AF_INET) {
+        return addr->in.sin_addr.s_addr == 0;
+    }
+
+    if (addr->sa.sa_family != NGTCP2_AF_INET6) {
+        return 0;
+    }
+
+    p = (const uint8_t *)&addr->in6.sin6_addr;
+
+    for (i = 0; i < sizeof(addr->in6.sin6_addr); ++i) {
+        if (p[i] != 0) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int
 net_quic_copy_ngtcp2_addr(
     ngtcp2_sockaddr_union *dest,
     ngtcp2_socklen *destlen,

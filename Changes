@@ -27,6 +27,8 @@ Unreleased
       Driver -> Connection -> Stream, with Endpoint documented as the low-level
       escape hatch.
     - Add examples for Linux::Event, AnyEvent, IO::Async, Mojo::IOLoop, and EV.
+    - Add a second IO::Async example using Future::AsyncAwait for sequential
+      application flow without changing the callback-based Driver integration.
     - Add a core IO::Select QUIC echo server for running the client examples.
     - Compile and run the event-loop examples in CI on the current Perl job.
 

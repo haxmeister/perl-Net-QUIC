@@ -357,8 +357,9 @@ outcomes.
 Connections obtained through L<Net::QUIC::Driver> are privately connected back
 to that Driver.
 
-State-changing application calls such as stream send/finish/reset, data
-consumption, and Connection close can therefore cause QUIC output and timer
+State-changing application calls such as stream send/finish/reset,
+stop_sending, data consumption, and Connection close can therefore cause QUIC
+output and timer
 changes to be serviced automatically.
 
 Application code does not need to call a separate pump or service method.

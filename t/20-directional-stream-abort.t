@@ -177,6 +177,15 @@ for (1 .. 200) {
 }
 
 isa_ok($stop_server, ['Net::QUIC::Stream']);
+
+my $before_stop_stats = $client->connection->_stream_tx_stats($stop_id);
+cmp_ok(
+    $before_stop_stats->[1],
+    '>',
+    0,
+    'client still retains unacknowledged transmit bytes before STOP_SENDING',
+);
+
 ok(!defined($stop_server->local_stop_sending_code),
     'local STOP_SENDING code starts undefined');
 
@@ -199,6 +208,13 @@ ok(!defined($stop_client->local_reset_code),
     'peer STOP_SENDING does not masquerade as an explicit local reset');
 is($stop_server->remote_reset_code, 88,
     'STOP_SENDING endpoint receives the matching RESET_STREAM when required');
+
+my $after_stop_stats = $client->connection->_stream_tx_stats($stop_id);
+is(
+    $after_stop_stats->[1],
+    0,
+    'stopped send side releases retained transmit bytes after packet processing',
+);
 
 like(
     dies { $stop_client->send('more data') },

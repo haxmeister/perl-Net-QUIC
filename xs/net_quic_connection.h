@@ -57,6 +57,7 @@ net_quic_system_free(void *ptr)
 #define NET_QUIC_STATELESS_RESET_MAX_RANDLEN \
     (NGTCP2_MAX_CIDLEN + 22 - NGTCP2_STATELESS_RESET_TOKENLEN)
 #define NET_QUIC_RETRY_TOKEN_TIMEOUT (10 * NGTCP2_SECONDS)
+#define NET_QUIC_NEW_TOKEN_TIMEOUT (24 * 60 * 60 * NGTCP2_SECONDS)
 
 static const char *
 net_quic_crypto_backend(void)

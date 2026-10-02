@@ -211,12 +211,6 @@ is(
     'client reports accepted 0-RTT',
 );
 
-my $fresh_server_tls = Net::QUIC::_ServerTLS->_new(
-    $cert_file,
-    $key_file,
-    0,
-);
-
 my $third_local = pack_sockaddr_in(40033, inet_aton('127.0.0.1'));
 my $third_client = new_client(
     local      => $third_local,
@@ -231,7 +225,7 @@ $rejected_stream->finish;
 my $third_server = new_server_connection(
     $third_client,
     $third_local,
-    $fresh_server_tls,
+    $server_tls,
 );
 
 while (my $datagram = $third_client->next_datagram) {
@@ -244,7 +238,7 @@ while (my $datagram = $third_client->next_datagram) {
 
 ok(
     !defined($third_server->next_stream),
-    'server does not expose rejected 0-RTT data',
+    'server does not expose replayed 0-RTT data',
 );
 
 for (1 .. 500) {
@@ -262,14 +256,14 @@ is(
     'client reports rejected 0-RTT',
 );
 ok(
-    !$third_client->connection->resumed,
-    'stale ticket falls back to a full TLS handshake',
+    $third_client->connection->resumed,
+    'replayed ticket still permits ordinary TLS resumption',
 );
 
 like(
     dies { $rejected_stream->send("stale\n") },
     qr/unknown QUIC stream/,
-    'stream object from rejected 0-RTT is invalidated',
+    'stream object from replay-rejected 0-RTT is invalidated',
 );
 
 my $retry_stream = $third_client->connection->open_bidi_stream;

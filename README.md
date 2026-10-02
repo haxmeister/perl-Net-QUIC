@@ -2,23 +2,40 @@
 
 Net::QUIC is a QUIC transport library for Perl.
 
-It gives Perl applications QUIC connections and QUIC streams without choosing
-an event loop for them.
+QUIC is a secure network transport built on UDP. A QUIC connection can carry
+many independent byte streams at the same time.
 
-Net::QUIC handles:
+If you are new to QUIC, the useful mental model is:
 
-- QUIC packet and connection state
-- TLS 1.3
+```text
+one QUIC connection
+    |
+    +-- stream
+    +-- stream
+    +-- stream
+```
+
+Each stream is a reliable ordered sequence of bytes.
+
+Net::QUIC handles the difficult transport work:
+
+- QUIC packets and connection state
+- TLS 1.3 encryption
 - certificate verification
-- stream flow control
-- retransmission and acknowledgement state
+- streams and flow control
+- retransmission and loss recovery
 - connection IDs
-- timers required by QUIC
+- timers
+- migration between network paths
+- QUIC v1 and QUIC v2
 
 Your event loop still owns the UDP socket.
 
-Net::QUIC is not HTTP/3, a web framework, or an application message protocol.
-QUIC streams carry ordered bytes. Applications decide what those bytes mean.
+You do not need to know ngtcp2 to use Net::QUIC. Net::QUIC uses ngtcp2
+internally as its native QUIC engine.
+
+Net::QUIC is not HTTP/3 and is not a web framework. It gives applications
+connections and byte streams. Your application decides what the bytes mean.
 
 ## Installation
 
@@ -28,16 +45,15 @@ From CPAN:
 cpanm Net::QUIC
 ```
 
-Net::QUIC uses `Alien::ngtcp2` for its native QUIC and TLS dependencies.
-A normal Net::QUIC install does not require you to separately find or configure
-ngtcp2.
+Net::QUIC uses `Alien::ngtcp2` to provide its native dependencies. A normal
+installation does not require you to find or configure ngtcp2 yourself.
 
-The event-loop modules shown in `examples/` are optional. Net::QUIC itself
+The event-loop modules used in `examples/` are optional. Net::QUIC itself
 does not require Linux::Event, AnyEvent, IO::Async, Mojolicious, or EV.
 
 ## Start here
 
-Most applications only need to understand three objects:
+Most application code only needs three classes:
 
 ```text
 Net::QUIC::Driver
@@ -47,229 +63,120 @@ Net::QUIC::Driver
                     +-- Net::QUIC::Stream
 ```
 
-Use `Net::QUIC::Driver` to connect Net::QUIC to an event loop.
+Use:
 
-Use `Net::QUIC::Connection` to open or accept QUIC streams.
+- `Net::QUIC::Driver` to connect Net::QUIC to UDP and a timer
+- `Net::QUIC::Connection` to represent one QUIC connection
+- `Net::QUIC::Stream` to send and receive application bytes
 
-Use `Net::QUIC::Stream` to send and receive application bytes.
+There is also a lower-level `Net::QUIC::Endpoint`. Most applications should
+use Driver instead.
 
-There is also a lower-level `Net::QUIC::Endpoint`. Most applications do not
-need to drive it directly.
+## What application code looks like
 
-The full internal relationship is:
+Once a connection is ready, application code is simple.
 
-```text
-Net::QUIC::Driver
-        |
-        +-- Net::QUIC::Endpoint
-                |
-                +-- Net::QUIC::Connection
-                            |
-                            +-- Net::QUIC::Stream
-```
-
-## The event-loop contract
-
-A Net::QUIC adapter needs only:
-
-- one UDP socket
-- one replaceable one-shot timer
-
-The adapter gives Driver two callbacks:
+Open a stream:
 
 ```perl
-send => sub {
-    my ($datagram) = @_;
+my $stream = $connection->open_bidi_stream;
 
-    # Accept one complete UDP datagram for output.
-    # Return true when another datagram can be accepted immediately.
-    # Return false after accepting this datagram if output is backpressured.
-},
-
-set_timeout => sub {
-    my ($seconds) = @_;
-
-    # Replace the current one-shot QUIC timeout.
-    # undef means cancel the current timeout.
-},
+if ($stream) {
+    $stream->send("hello\n");
+    $stream->finish;
+}
 ```
 
-The `send` callback receives one complete `Net::QUIC::Datagram`.
-
-Its useful values are:
+Accept streams opened by the peer:
 
 ```perl
-$datagram->data;     # complete UDP payload bytes
-$datagram->peer;     # packed destination socket address
-$datagram->local;    # packed local socket address chosen by QUIC
-$datagram->ecn;      # two-bit ECN codepoint for the IP header
-```
-
-The adapter sends `data` as one UDP datagram to `peer`. `local` describes
-the local path associated with that packet and is useful to integrations that
-manage more than one local address.
-
-The event loop reports four events back to Driver:
-
-```perl
-$driver->start;
-
-$driver->receive(
-    $bytes,
-    $packed_local_address,
-    $packed_peer_address,
-    $ecn,
-);
-
-$driver->timeout;
-
-$driver->writable;
-```
-
-That is the complete ordinary adapter contract.
-
-The fourth `$ecn` receive argument is optional. Old adapters can omit it and
-continue to operate with ECN disabled at the socket boundary.
-
-An ECN-aware adapter reads the two ECN bits from the received IP header and
-passes the wire value through unchanged:
-
-```text
-0   Not-ECT
-1   ECT(1)
-2   ECT(0)
-3   CE
-```
-
-For output, it places `$datagram->ecn` into the IP-header ECN field before
-sending the UDP datagram.
-
-ngtcp2 owns ECN testing, validation, congestion response, and disabling ECN
-when a path does not preserve or report markings correctly. Net::QUIC only
-carries the packet metadata between ngtcp2 and the UDP adapter.
-
-There is no application-visible QUIC pump loop.
-
-Driver drains QUIC output, pauses when the adapter reports backpressure,
-resumes when `writable` is called, and replaces the QUIC timer whenever the
-deadline changes.
-
-Stream operations such as `send`, `finish`, `reset`, and `next_data`
-automatically notify Driver when more QUIC work may be needed.
-
-Driver handles transport servicing; it does not decide what your application
-should do. After `receive`, `timeout`, or `writable` returns, application
-code can inspect the Connection and Streams normally:
-
-```perl
-$driver->receive($bytes, $local, $peer);  # or add $ecn as a fourth argument
-
-if ($connection->ready) {
-    while (my $stream = $connection->next_stream) {
-        ...
+while (my $stream = $connection->next_stream) {
+    while (defined(my $bytes = $stream->next_data)) {
+        handle_bytes($bytes);
     }
 }
 ```
 
-The examples use this pattern through a small application-service callback.
-
-## Local addresses and wildcard UDP sockets
-
-The `local` address passed to Net::QUIC is part of the QUIC network path. It
-must be the concrete IPv4 or IPv6 address for that packet.
-
-These are not valid QUIC local paths:
-
-```text
-0.0.0.0
-::
-```
-
-They are wildcard bind addresses. They mean "accept traffic for any local
-address"; they do not identify the address on which one particular UDP packet
-arrived.
-
-A client normally avoids this issue by connecting its UDP socket first and
-using `getsockname` after the kernel has selected the concrete local address.
-
-A server may bind its UDP socket to a wildcard address, but its adapter must
-recover the actual destination address of every received packet and pass that
-packed address to:
+Close the connection:
 
 ```perl
-$driver->receive($bytes, $local, $peer, $ecn);
+$connection->close;
 ```
 
-The `$ecn` value is optional when the adapter cannot read ECN metadata.
+The UDP socket and QUIC timer normally stay in your event-loop adapter rather
+than in the application protocol code.
 
-The adapter must also send each outbound Datagram using the local source address
-reported by:
+## QUIC streams are byte streams
+
+A QUIC stream is an ordered sequence of bytes.
+
+It is not a sequence of messages.
+
+This:
 
 ```perl
-$datagram->local;
+$stream->send("one");
+$stream->send("two");
 ```
 
-For a socket bound to one concrete address, the socket already fixes the local
-path and no special source-address selection is normally needed.
+does not guarantee that the peer receives exactly two `next_data` results.
 
-For a wildcard-bound socket this usually requires packet-info support. On
-Linux, IPv4 adapters can use `IP_PKTINFO` with `recvmsg` / `sendmsg`;
-IPv6 has the corresponding packet-info mechanism. Other operating systems have
-their own destination-address ancillary-data APIs.
+If your application needs messages, add its own framing. For example, it could
+use newline-delimited messages, fixed-size records, or a length prefix.
 
-Net::QUIC deliberately does not implement those socket operations. The event
-loop or UDP adapter owns the socket. Net::QUIC rejects wildcard addresses at
-its QUIC path boundary so an adapter cannot accidentally give ngtcp2 an
-incorrect network path.
+QUIC gives each stream its own ordering and flow control. A blocked or lost
+packet on one stream does not turn all other streams into one shared byte
+stream.
 
-If an event system cannot report the destination address for a wildcard-bound
-socket, bind the QUIC socket to one concrete local address instead.
+## Bidirectional and unidirectional streams
 
-## Event-loop examples
+A bidirectional stream allows both endpoints to send:
 
-The `examples/` directory contains complete client integrations for common
-Perl event systems:
-
-```text
-examples/linux-event-client.pl
-examples/anyevent-client.pl
-examples/io-async-client.pl
-examples/io-async-async-await-client.pl
-examples/mojo-ioloop-client.pl
-examples/ev-client.pl
+```perl
+my $stream = $connection->open_bidi_stream;
 ```
 
-They all implement the same Driver contract so the event-loop-specific part is
-easy to compare.
+A unidirectional stream allows only the endpoint that created it to send:
 
-The two IO::Async examples deliberately show both styles: one keeps the
-application callback-driven, while the other uses Future::AsyncAwait so the
-application flow can be written sequentially without changing the Net::QUIC
-Driver API.
+```perl
+my $stream = $connection->open_uni_stream;
+```
 
-See `examples/README.md` for how to run them.
+A stream can also tell you what this endpoint is allowed to do:
 
-## A client connection
+```perl
+$stream->can_send;
+$stream->can_receive;
+```
 
-A client Driver is created after the UDP socket addresses are known.
+## Waiting for the connection
 
-The four values that identify the connection are straightforward:
+A new QUIC connection performs a TLS handshake before normal application work
+begins.
 
-- `local` is this UDP socket's packed local address.
-- `peer` is the server's packed UDP address.
-- `alpn` names the application protocol carried over QUIC. Client and server
-  must use a compatible ALPN value.
-- `server_name` is the DNS name or IP address that the server certificate is
-  expected to represent. It is used for certificate verification.
+Check:
 
-For example, a client can connect to the numeric peer address
-`192.0.2.20:4433` while using `server_name => 'service.example.com'` when
-that is the name on the server certificate.
+```perl
+if ($connection->ready) {
+    ...
+}
+```
 
-The packed addresses are the ordinary native socket-address values used by
-Perl's `Socket` APIs. Event-loop socket objects can often provide them
-directly.
+A server can receive a new Connection object before its handshake has
+completed. This is normal.
 
+## A client
+
+A client Driver needs:
+
+- `local` - the packed local UDP socket address
+- `peer` - the packed server UDP address
+- `alpn` - the name of the application protocol carried over QUIC
+- `server_name` - the name expected in the server certificate
+- `send` - a callback that transmits one UDP datagram
+- `set_timeout` - a callback that replaces the QUIC timer
+
+For example:
 
 ```perl
 use Net::QUIC::Driver;
@@ -282,12 +189,13 @@ my $driver = Net::QUIC::Driver->client(
 
     send => sub {
         my ($datagram) = @_;
-        ...
+        send_udp($datagram);
+        return 1;
     },
 
     set_timeout => sub {
         my ($seconds) = @_;
-        ...
+        replace_timer($seconds);
     },
 );
 
@@ -296,23 +204,42 @@ my $connection = $driver->connection;
 $driver->start;
 ```
 
-`local` and `peer` are packed IPv4 or IPv6 socket addresses.
+`start` tells Driver that the UDP transport is ready. The client can then
+produce its first QUIC packet.
 
-The Driver constructor does not send packets. `start` tells it the UDP
-transport is ready. A client normally produces its first QUIC Initial packet at
-that point.
+### What is ALPN?
 
-The cryptographic handshake completes asynchronously:
+ALPN is simply a short protocol name agreed on by the client and server.
+
+For a custom protocol you might use:
 
 ```perl
-if ($connection->ready) {
-    ...
-}
+alpn => 'my-protocol'
+```
+
+It prevents two unrelated protocols from accidentally using the same QUIC
+connection.
+
+### What is server_name?
+
+`server_name` is the DNS name or IP address that the server certificate must
+represent.
+
+For example, the UDP peer can be a numeric address:
+
+```text
+192.0.2.20:4433
+```
+
+while certificate verification uses:
+
+```perl
+server_name => 'service.example.com'
 ```
 
 ## A server
 
-A server uses the same Driver contract:
+A server Driver uses the same UDP/timer contract:
 
 ```perl
 my $driver = Net::QUIC::Driver->server(
@@ -322,26 +249,26 @@ my $driver = Net::QUIC::Driver->server(
 
     send => sub {
         my ($datagram) = @_;
-        ...
+        send_udp($datagram);
+        return 1;
     },
 
     set_timeout => sub {
         my ($seconds) = @_;
-        ...
+        replace_timer($seconds);
     },
 );
 
 $driver->start;
 ```
 
-Feed each received UDP packet to the same Driver:
+Feed received UDP packets into Driver:
 
 ```perl
 $driver->receive($bytes, $local, $peer);
 ```
 
-A server Driver can own many QUIC connections. Pull newly created connections
-with:
+Pull newly created connections with:
 
 ```perl
 while (my $connection = $driver->next_connection) {
@@ -349,74 +276,192 @@ while (my $connection = $driver->next_connection) {
 }
 ```
 
-A server Connection may be returned before its handshake is complete. Check
-`ready` before beginning application work that requires an established
-connection.
+One server Driver can manage many QUIC connections on one UDP socket.
 
-Set:
+## The event-loop contract
 
-```perl
-validate_address => 1
-```
+Net::QUIC deliberately does not choose an event loop.
 
-to require QUIC Retry/address validation before allocating a new Connection.
+The event loop owns:
 
-Without that option, address validation is off and the extra Retry round trip
-is avoided.
+- the UDP socket
+- one replaceable one-shot timer
 
-When address validation is enabled, a validated connection automatically
-receives a NEW_TOKEN after the handshake:
+Driver needs two callbacks from the adapter:
 
 ```perl
-my $token = $connection->address_token;
+send => sub {
+    my ($datagram) = @_;
+
+    # Send one complete UDP datagram.
+    #
+    # Return true if another datagram can be accepted immediately.
+    # Return false if this datagram was accepted but output is now blocked.
+},
+
+set_timeout => sub {
+    my ($seconds) = @_;
+
+    # Replace the current one-shot QUIC timer.
+    # undef means cancel it.
+},
 ```
 
-A later connection from the same client IP can offer it:
+The event loop reports four events to Driver:
 
 ```perl
-my $driver = Net::QUIC::Driver->client(
-    ...
-    address_token => $token,
-);
+$driver->start;
+$driver->receive($bytes, $local, $peer);
+$driver->timeout;
+$driver->writable;
 ```
 
-A valid token avoids another Retry round trip. The token is opaque, independent
-of TLS session resumption, and currently valid for 24 hours. It is bound to the
-client IP address rather than the UDP source port.
+That is the normal Driver contract.
 
-If the token is invalid for the new address, the server treats the address as
-unvalidated and falls back to Retry rather than failing the connection solely
-because the NEW_TOKEN was unusable.
+There is no application-visible QUIC pump loop.
 
-## Sending on a stream
+Driver automatically drains pending QUIC output, updates the timer, pauses for
+UDP backpressure, and resumes after `writable`.
 
-Open a bidirectional stream:
+Application operations such as:
 
 ```perl
-my $stream = $connection->open_bidi_stream;
-
-if ($stream) {
-    $stream->send("hello\n");
-    $stream->finish;
-}
+$stream->send(...);
+$stream->finish;
+$stream->reset(...);
+$connection->close;
 ```
 
-`finish` sends QUIC FIN after the already queued bytes. It closes only this
-endpoint's send side. The peer can still reply on the same bidirectional
-stream.
+also notify Driver automatically when transport work is needed.
 
-A local unidirectional stream is opened with:
+## Net::QUIC::Datagram
+
+The `send` callback receives a `Net::QUIC::Datagram`.
+
+Useful fields are:
 
 ```perl
-my $stream = $connection->open_uni_stream;
+$datagram->data;   # complete UDP payload
+$datagram->local;  # packed local source address
+$datagram->peer;   # packed destination address
+$datagram->ecn;    # ECN codepoint for the IP header
 ```
 
-This endpoint can send on that stream but cannot receive application bytes from
-it.
+Do not split `data`. It is one complete UDP datagram.
 
-## When opening a stream returns undef
+For the common case of a socket bound to one concrete local address, the socket
+already supplies the correct source address.
 
-QUIC limits how many streams an endpoint may have open at once.
+The `local` value becomes especially important for wildcard sockets and
+connection migration.
+
+## Local addresses
+
+QUIC needs to know the actual network path used by each packet.
+
+The `local` value passed to Net::QUIC must therefore be a concrete IPv4 or
+IPv6 address.
+
+These are wildcard bind addresses, not concrete QUIC paths:
+
+```text
+0.0.0.0
+::
+```
+
+A client normally avoids this problem by connecting its UDP socket and using
+`getsockname` after the kernel chooses a local address.
+
+A server can still bind to a wildcard address, but its adapter must discover
+the actual destination address of each received packet and pass that concrete
+address to:
+
+```perl
+$driver->receive($bytes, $local, $peer);
+```
+
+On Linux this is commonly done with packet-info ancillary data and
+`recvmsg` / `sendmsg`.
+
+If an event system cannot report the actual destination address, bind the QUIC
+socket to one concrete local address instead.
+
+## UDP backpressure
+
+A UDP send can temporarily be unable to accept another packet.
+
+The Driver `send` callback uses its return value to report that condition:
+
+- true - another datagram can be accepted immediately
+- false - this datagram was accepted, but stop sending more for now
+
+When output becomes writable again, call:
+
+```perl
+$driver->writable;
+```
+
+Driver then continues where it stopped.
+
+## TLS and certificate verification
+
+QUIC always uses TLS 1.3.
+
+Clients verify server certificates by default.
+
+`server_name` is the name checked against the certificate:
+
+```perl
+server_name => 'example.com'
+```
+
+OpenSSL's normal trust locations are used.
+
+For a private or test CA:
+
+```perl
+ca_file => '/path/to/private-ca.pem'
+```
+
+adds that PEM file to the trust store.
+
+Net::QUIC does not provide an insecure "skip certificate verification" switch.
+
+Server certificate and key files are loaded when the server is created and
+shared by connections accepted by that server.
+
+## Closing streams
+
+A normal stream finish is:
+
+```perl
+$stream->finish;
+```
+
+This means "I am done sending after the bytes already queued."
+
+On a bidirectional stream, the peer can still send data back.
+
+Abort this endpoint's send side:
+
+```perl
+$stream->reset($application_error_code);
+```
+
+Stop receiving and ask the peer to stop its send side:
+
+```perl
+$stream->stop_sending($application_error_code);
+```
+
+The send and receive directions are independent.
+
+For normal code, `finish` is usually what you want. `reset` and
+`stop_sending` are abrupt error/abort operations.
+
+## Stream limits
+
+QUIC limits how many streams can be open at once.
 
 Therefore:
 
@@ -426,9 +471,10 @@ my $stream = $connection->open_bidi_stream;
 
 can return `undef`.
 
-That is normal flow control. It does not mean the Connection failed.
+That does not mean the connection failed. It means the peer has not currently
+given this endpoint permission to open another stream.
 
-If the application needs to wait for more stream credit:
+To wait for more stream credit:
 
 ```perl
 $connection->on_stream_available(sub {
@@ -442,80 +488,6 @@ $connection->on_stream_available(sub {
     ...
 });
 ```
-
-`$type` is `bidi` or `uni`.
-
-## Receiving peer streams
-
-Streams opened by the peer are pulled from the Connection:
-
-```perl
-while (my $stream = $connection->next_stream) {
-    ...
-}
-```
-
-Read available bytes with:
-
-```perl
-while (defined(my $bytes = $stream->next_data)) {
-    handle_bytes($bytes);
-}
-```
-
-QUIC streams are byte streams, not message streams.
-
-One call to:
-
-```perl
-$stream->send($message);
-```
-
-does not guarantee one matching `next_data` call on the peer.
-
-If an application needs messages, it should put its own framing on the QUIC
-stream.
-
-## Stream completion and directional aborts
-
-A clean peer FIN is visible through:
-
-```perl
-if ($stream->remote_finished) {
-    ...
-}
-```
-
-Abort this endpoint's send side with RESET_STREAM:
-
-```perl
-$stream->reset($application_error_code);
-```
-
-Abort this endpoint's receive side and ask the peer to stop with STOP_SENDING:
-
-```perl
-$stream->stop_sending($application_error_code);
-```
-
-The two directions are independent on bidirectional streams. Resetting the send
-side does not stop receiving, and STOP_SENDING does not stop this endpoint from
-sending in the opposite direction.
-
-The error codes are available separately:
-
-```perl
-my $local_reset = $stream->local_reset_code;
-my $peer_reset  = $stream->remote_reset_code;
-
-my $local_stop  = $stream->local_stop_sending_code;
-my $peer_stop   = $stream->remote_stop_sending_code;
-```
-
-`closed` becomes true after ngtcp2 reports the stream completely closed.
-
-A Stream object keeps its Connection alive. Final stream state and unread
-buffered receive data remain available while the Stream object still exists.
 
 ## Closing a connection
 
@@ -531,19 +503,16 @@ or:
 $connection->close($application_error_code);
 ```
 
-The default application error code is zero.
+QUIC does not destroy the connection immediately. It has a short
+closing/draining period so late packets can still be handled correctly.
 
-Closing is not immediate destruction. QUIC has a closing/draining period during
-which late packets still need to be handled.
-
-`closed` becomes true only after the Connection no longer needs network or
+`$connection->closed` becomes true when the connection no longer needs UDP or
 timer service.
 
-## Connection errors and close information
+## Connection errors
 
-Remote protocol errors, TLS failures, certificate failures, idle timeout, and
-normal application close are connection outcomes rather than generic Perl
-exceptions.
+Remote errors and normal close conditions are stored on the Connection rather
+than thrown as ordinary Perl exceptions.
 
 Inspect them with:
 
@@ -551,9 +520,7 @@ Inspect them with:
 my $info = $connection->close_info;
 ```
 
-It returns `undef` while no close or failure has been recorded.
-
-A normal peer application close can look like:
+For example:
 
 ```perl
 {
@@ -563,7 +530,7 @@ A normal peer application close can look like:
 }
 ```
 
-Possible `type` values are:
+Possible `type` values include:
 
 ```text
 application
@@ -575,353 +542,331 @@ idle
 drop
 ```
 
-`initiator` is `local` or `peer`.
+Programming mistakes, invalid local configuration, allocation failures, and
+internal failures still throw Perl exceptions.
 
-Local API misuse, invalid configuration, allocation failure, and internal
-implementation failures still throw exceptions. Those are programming or
-system failures rather than normal remote connection outcomes.
-
-## TLS and certificate verification
-
-QUIC always uses TLS 1.3.
-
-Net::QUIC uses Picotls for QUIC TLS. Picotls uses OpenSSL underneath for
-cryptography and certificate verification.
-
-Clients verify server certificates by default.
-
-`server_name` is used for DNS-name or IP-address verification:
-
-```perl
-my $driver = Net::QUIC::Driver->client(
-    ...
-    server_name => 'example.com',
-);
-```
-
-OpenSSL's default trust locations are used.
-
-For a private or test CA:
-
-```perl
-ca_file => '/path/to/private-ca.pem'
-```
-
-adds that PEM file to the trust store.
-
-Net::QUIC does not provide an insecure skip-verification switch.
-
-Server certificate and key files are loaded when the server Endpoint is
-created. Accepted Connections reuse the shared server TLS credential context;
-the files are not reopened for every Connection.
-
-## QUIC versions
+## QUIC v1 and v2
 
 Net::QUIC supports QUIC v1 and QUIC v2.
 
-Clients use v1 by default. To start directly with v2:
+Clients use v1 by default:
 
 ```perl
-my $driver = Net::QUIC::Driver->client(
-    ...
-    version => 2,
-);
+version => 1
 ```
 
-Servers can prefer v2 while remaining compatible with v1 clients:
+To start directly with v2:
 
 ```perl
-my $driver = Net::QUIC::Driver->server(
-    ...
-    preferred_version => 2,
-);
+version => 2
 ```
 
-Both sides advertise v1 and v2 through Compatible Version Negotiation. A
-default v1 client can therefore move to v2 during the same handshake when the
-server prefers it.
-
-The distinction is observable:
+A server can prefer v2:
 
 ```perl
-$connection->client_chosen_version;  # first Initial: 1 or 2
-$connection->version;                # negotiated result: 1 or 2
+preferred_version => 2
 ```
 
-Session tickets, NEW_TOKEN address tokens, and 0-RTT state are version-specific.
-Their public values remain opaque; Net::QUIC remembers the version inside them
-and automatically uses the correct version on the next connection.
+while still accepting compatible v1 clients.
 
-## TLS session resumption
+Normally you do not need to care which version was used.
 
-A client Connection can return an opaque TLS session ticket:
+For diagnostics:
+
+```perl
+$connection->client_chosen_version;
+$connection->version;
+```
+
+## Session resumption
+
+A completed client connection can receive an opaque TLS session ticket:
 
 ```perl
 my $ticket = $connection->session_ticket;
 ```
 
-A later client connection can offer that ticket:
+A later connection can offer it:
 
 ```perl
-my $driver = Net::QUIC::Driver->client(
-    ...
-    session_ticket => $ticket,
-);
+session_ticket => $ticket
 ```
 
-After the handshake completes:
+After the handshake:
 
 ```perl
-if ($driver->connection->resumed) {
+if ($connection->resumed) {
     ...
 }
 ```
 
-reports whether TLS actually resumed the previous session.
+reports whether TLS actually resumed the old session.
 
-Applications should treat the ticket as opaque bytes and cache it for the same
-server identity and ALPN. Net::QUIC does not require an application to use a
-particular cache or persistence mechanism.
+Treat the ticket as opaque bytes. Net::QUIC remembers the QUIC version inside
+the opaque value.
 
-If a ticket is expired, invalid, or belongs to an older server ticket key, TLS
-falls back to a normal full handshake instead of failing the connection.
-
-The server Endpoint keeps one randomly generated session-ticket key for its
-lifetime. Connections accepted by that Endpoint share the key. Recreating the
-server Endpoint creates a new key, so tickets issued by the old Endpoint no
-longer resume and instead fall back to a full handshake.
-
-Session resumption by itself does not enable 0-RTT. Application data still
-waits for the normal QUIC/TLS handshake readiness rules unless early data is
-explicitly requested.
+If the ticket is expired or no longer valid, the connection falls back to a
+normal full handshake.
 
 ## 0-RTT / early data
 
-0-RTT is opt-in on both sides.
+0-RTT lets a returning client send some application data before the new
+handshake has completed.
 
-After a completed client connection receives a session ticket, save one opaque
-early-data state value:
+It is optional because early data can be replayed by the network.
+
+Only use 0-RTT for operations that are safe to repeat.
+
+Save the opaque state:
 
 ```perl
 my $state = $connection->early_data_state;
 ```
 
-A later client can deliberately attempt 0-RTT with:
+Use it on a later client:
 
 ```perl
-my $driver = Net::QUIC::Driver->client(
-    ...
-    early_data => $state,
-);
+early_data => $state
 ```
 
-The server must also explicitly allow it:
+The server must also allow it:
 
 ```perl
-my $driver = Net::QUIC::Driver->server(
-    ...
-    accept_early_data => 1,
-);
+accept_early_data => 1
 ```
 
-The client may then open and send on local streams before
-`$connection->ready` becomes true.
-
-Check the outcome with:
+Check what happened:
 
 ```perl
-$connection->early_data_status
+$connection->early_data_status;
 ```
 
-which returns `none`, `pending`, `accepted`, or `rejected`.
+Possible values are:
 
-If 0-RTT is rejected, the normal handshake can continue. Net::QUIC rolls back
-the early stream state through ngtcp2. Stream objects created for the rejected
-attempt become invalid; after the handshake becomes ready, open new streams and
-resend only when the application operation is safe to retry.
+```text
+none
+pending
+accepted
+rejected
+```
 
-On the server:
+If early data is rejected, the ordinary handshake can still succeed. Open new
+streams after the connection becomes ready and resend only operations that are
+safe to repeat.
+
+On a server, a received stream can be checked with:
 
 ```perl
-if ($stream->early_data) {
-    ...
-}
+$stream->early_data;
 ```
 
-identifies a stream that carried 0-RTT data. The flag remains available after
-the handshake completes.
+## Retry and NEW_TOKEN
 
-0-RTT data is replayable. Applications must restrict it to operations that are
-safe to repeat. Net::QUIC also gives each server session ticket one 0-RTT
-allowance. The first successful use of the ticket consumes that allowance,
-including an ordinary resumed handshake that does not send early data. A later
-reuse can still resume TLS, but its early data is rejected.
+A server can require clients to prove that they can receive packets at their
+source address before it allocates full connection state:
 
-A successful resumed connection receives a fresh ticket, so applications should
-replace cached session or early-data state with the newest value.
+```perl
+validate_address => 1
+```
 
-The early-data state is opaque and contains the matching TLS ticket and
-remembered QUIC transport parameters. Cache it for the same server identity and
-ALPN; do not parse or modify it.
+A new client may then receive a QUIC Retry packet and repeat its Initial.
 
-## Network paths and migration
+After a validated connection succeeds, the server can give the client a
+NEW_TOKEN.
 
-A client can migrate an established connection to a different local network
-path without creating a new QUIC connection:
+The client exposes that opaque token as:
+
+```perl
+my $token = $connection->address_token;
+```
+
+A later connection can reuse it:
+
+```perl
+address_token => $token
+```
+
+A valid token can avoid another Retry round trip.
+
+Most applications can simply cache this opaque value alongside the session
+ticket if they want faster returning connections.
+
+## Network migration
+
+QUIC can keep a connection alive when the client's local network path changes.
+
+For example, an application can move an established connection to another
+local address:
 
 ```perl
 $connection->migrate($new_packed_local_address);
 ```
 
-Net::QUIC validates the new path with PATH_CHALLENGE/PATH_RESPONSE before
-switching the connection to it.
+Net::QUIC tests the new path before switching to it.
 
-The current path is available as:
+Check progress with:
+
+```perl
+$connection->path_validation_status;
+```
+
+Possible values are:
+
+```text
+none
+validating
+succeeded
+failed
+aborted
+```
+
+If validation fails, the old working path remains active.
+
+The current path is available from:
 
 ```perl
 my $path = $connection->path;
-
-# {
-#     local => $packed_local_address,
-#     peer  => $packed_peer_address,
-# }
 ```
 
-Validation progress is available through:
+## Preferred server address
+
+A server can tell the client that another server address is preferred:
 
 ```perl
-$connection->path_validation_status
+preferred_address => $packed_server_address
 ```
 
-which returns `none`, `validating`, `succeeded`, `failed`, or
-`aborted`. `path_validation` returns the same status with the local/peer
-addresses and validation flags.
+The client tests that path before switching.
 
-Migration does not change the Driver API. The adapter still owns the UDP
-sockets and must send each datagram using the exact source and destination in:
+The UDP adapter must actually be able to send and receive on the advertised
+address.
 
-```perl
-$datagram->local
-$datagram->peer
-```
+## PMTU discovery
 
-Path MTU discovery is handled by ngtcp2 automatically. The current discovered
-UDP payload ceiling is available through:
+Different network paths can safely carry different UDP packet sizes.
+
+Net::QUIC lets ngtcp2 discover a useful packet size for the current path.
+
+For diagnostics:
 
 ```perl
 my $bytes = $connection->path_max_udp_payload_size;
 ```
 
-A new path starts at 1200 bytes. On a lossless ordinary Ethernet path, PMTUD can
-raise that ceiling toward ngtcp2's configured transmit maximum. Discovery is
-restarted after a validated path change.
+A new path starts at QUIC's safe 1200-byte baseline. Discovery can raise that
+value when larger packets work.
 
-A server can optionally advertise another address for the same connection:
+Most applications do not need to manage this themselves.
 
-```perl
-my $driver = Net::QUIC::Driver->server(
-    ...
-    preferred_address => $packed_server_address,
-);
-```
+## ECN
 
-The adapter must actually receive and send UDP traffic on that address. The
-client validates the advertised address before switching to it.
+ECN is an IP feature that can report congestion without requiring a packet to
+be dropped.
 
-## Transport defaults
+ECN support is optional at the adapter boundary.
 
-Client and server constructors accept an optional `transport` hash:
+An ECN-aware adapter can pass the two-bit codepoint from the received IP packet:
 
 ```perl
-transport => {
-    handshake_timeout => 10,
-    idle_timeout      => 30,
-    connection_window => 1024 * 1024,
-    stream_window     => 256 * 1024,
-    max_bidi_streams  => 100,
-    max_uni_streams   => 100,
-}
+$driver->receive($bytes, $local, $peer, $ecn);
 ```
 
-Those values are the Net::QUIC defaults.
-
-Timeout values are seconds and may be fractional.
-
-`idle_timeout => 0` disables the advertised idle timeout.
-
-The receive windows are bytes. They are starting flow-control windows, not
-lifetime transfer limits. Net::QUIC returns receive credit as application data
-is consumed.
-
-The stream counts are initial concurrent peer-stream limits. Stream credit is
-returned as peer streams close.
-
-Active connection migration is advertised as supported. It is transport
-behavior rather than a constructor tuning knob.
-
-ACK timing, congestion control, PMTU policy, packet-size shaping, and
-connection-ID management remain Net::QUIC/ngtcp2 policy rather than public
-constructor knobs.
-
-## The lower-level Endpoint
-
-Most event-loop adapters should use Driver.
-
-`Net::QUIC::Endpoint` remains available when direct control is needed.
-
-Its integration API is:
+For outgoing traffic it applies:
 
 ```perl
-$endpoint->receive_datagram($bytes, $local, $peer);
-
-while (my $datagram = $endpoint->next_datagram) {
-    ...
-}
-
-my $seconds = $endpoint->timeout_after;
-
-$endpoint->handle_timeout;
+$datagram->ecn;
 ```
 
-When using Endpoint directly, the caller is responsible for repeatedly
-draining output and replacing the timer after every state change.
+to the IP header.
 
-Driver exists specifically so ordinary adapters do not have to repeat those
-rules.
-
-## Native dependency
-
-Net::QUIC requires Alien::ngtcp2 0.03 or newer.
-
-Alien::ngtcp2 supplies the tested ngtcp2 and Picotls build.
-
-Normal Net::QUIC applications do not choose a TLS backend.
-
-## Scope
-
-Net::QUIC is the transport layer.
-
-HTTP/3 belongs in a separate distribution above it.
-
-The remaining later QUIC extensions and advanced tooling include:
+The wire values are:
 
 ```text
-QUIC DATAGRAM
-qlog
-advanced congestion-control tuning
+0   Not-ECT
+1   ECT(1)
+2   ECT(0)
+3   CE
 ```
 
-These can be added without changing the basic Driver, Connection, and Stream
-model.
+If the adapter does not provide ECN metadata, the normal three-argument
+`receive` form remains valid.
 
-## Development
+Net::QUIC's native engine tests whether ECN works correctly on the path and
+automatically stops using it when necessary.
+
+## Lower-level Endpoint API
+
+`Net::QUIC::Endpoint` is the engine underneath Driver.
+
+It exposes:
 
 ```text
-perl Makefile.PL
-make
-make test
+receive_datagram
+next_datagram
+timeout_after
+handle_timeout
+```
+
+Use Endpoint directly only when you want to own output draining,
+backpressure handling, and timer replacement yourself.
+
+Most event-loop integrations are simpler with Driver.
+
+## Examples
+
+The `examples/` directory contains complete integrations for:
+
+- Linux::Event
+- AnyEvent
+- IO::Async
+- IO::Async with Future::AsyncAwait
+- Mojo::IOLoop
+- EV
+- a small IO::Select echo server
+
+All client examples implement the same Driver contract.
+
+See `examples/README.md` for commands and notes.
+
+## What is not part of Net::QUIC
+
+Net::QUIC is the base QUIC transport.
+
+It does not define:
+
+- HTTP/3
+- an RPC protocol
+- an application message format
+- a web framework
+
+QUIC DATAGRAM is a separate optional QUIC extension and is not required for the
+base transport implemented here.
+
+qlog and advanced congestion-control configuration are also separate tooling or
+advanced configuration work.
+
+## Native implementation
+
+Net::QUIC uses ngtcp2 for the native QUIC transport and Picotls/OpenSSL for
+QUIC TLS.
+
+Most application code does not need to know those APIs.
+
+The important public boundary remains:
+
+```text
+event loop / UDP
+        |
+        v
+Net::QUIC::Driver
+        |
+        v
+Net::QUIC::Connection
+        |
+        v
+Net::QUIC::Stream
 ```
 
 ## License
 
-Net::QUIC is MIT licensed.
+MIT

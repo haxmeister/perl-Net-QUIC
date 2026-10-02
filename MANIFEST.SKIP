@@ -11,4 +11,5 @@
 ^Net-QUIC-.*\.tar\.gz$
 ^cover_db/
 ^handoff\.md$
+^missing_features\.md$
 ^Net-QUIC-[^/]+/

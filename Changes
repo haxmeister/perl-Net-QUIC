@@ -1,6 +1,14 @@
 Revision history for Net-QUIC
 
 Unreleased
+    - Add validated client connection migration to a new local network path.
+    - Add Connection->path, Connection->path_validation, and
+      Connection->path_validation_status.
+    - Wire ngtcp2 path-validation start/result callbacks for clients and servers.
+    - Keep migration event-loop neutral: Datagram continues to carry the exact
+      local and peer addresses selected by QUIC.
+    - Add a two-path integration test proving PATH_CHALLENGE/PATH_RESPONSE
+      validation and existing-stream continuity across migration.
     - Split stream aborts into independent RESET_STREAM and STOP_SENDING operations.
     - Make Stream->reset abort only the local send side, matching its documented behavior.
     - Add Stream->stop_sending for aborting the local receive side.

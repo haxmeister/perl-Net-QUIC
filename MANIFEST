@@ -43,6 +43,7 @@ t/18-destructive-lifecycle.t
 t/19-local-address.t
 t/20-directional-stream-abort.t
 t/21-session-resumption.t
+t/22-early-data.t
 t/data/server-cert.pem
 t/data/server-key.pem
 xs/net_quic_connection.h

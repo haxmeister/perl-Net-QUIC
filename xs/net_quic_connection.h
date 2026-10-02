@@ -13,6 +13,12 @@ net_quic_system_fclose(FILE *fp)
     return fclose(fp);
 }
 
+static void *
+net_quic_system_calloc(size_t count, size_t size)
+{
+    return calloc(count, size);
+}
+
 static void
 net_quic_system_free(void *ptr)
 {

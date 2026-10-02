@@ -155,6 +155,50 @@ sub close_info {
     return $self->_close_info;
 }
 
+sub migrate {
+    my ($self, $local) = @_;
+
+    die "missing migration local address"
+        if !defined $local;
+
+    $self->_migrate($local);
+    $self->_notify_output;
+    return;
+}
+
+sub path {
+    my ($self) = @_;
+
+    my $path = $self->_path;
+    return if !defined $path;
+
+    return {
+        local => $path->[0],
+        peer  => $path->[1],
+    };
+}
+
+sub path_validation_status {
+    my ($self) = @_;
+
+    my $state = $self->_path_validation;
+    return 'none' if !defined $state;
+
+    my @status = qw(none validating succeeded failed aborted);
+    my $status = $status[$state->[0]];
+
+    die "invalid native path validation status"
+        if !defined $status;
+
+    return {
+        status            => $status,
+        local             => $state->[2],
+        peer              => $state->[3],
+        preferred_address => ($state->[1] & 0x01) ? 1 : 0,
+        new_token         => ($state->[1] & 0x02) ? 1 : 0,
+    };
+}
+
 sub early_data_state {
     my ($self) = @_;
 
@@ -326,6 +370,67 @@ The ticket is opaque. Applications should not parse or modify it.
 
 Net::QUIC does not enable 0-RTT merely because a session ticket is supplied.
 This method currently provides handshake resumption only.
+
+=head1 NETWORK PATHS
+
+=head2 path
+
+    my $path = $connection->path;
+
+Returns the current active QUIC network path:
+
+    {
+        local => $packed_local_address,
+        peer  => $packed_peer_address,
+    }
+
+The addresses use the same packed IPv4/IPv6 representation used by Driver,
+Endpoint, and Datagram.
+
+=head2 migrate
+
+    $connection->migrate($new_packed_local_address);
+
+Starts validated client migration to a new local network path.
+
+The remote server address remains unchanged. Net::QUIC first validates the new
+path with PATH_CHALLENGE/PATH_RESPONSE and switches to it only after validation
+succeeds.
+
+The event-loop adapter remains responsible for actually sending datagrams with
+the source address in C<Datagram-E<gt>local> and for reporting the concrete
+local destination address of received packets. No new Driver callback is
+required.
+
+C<migrate> is client-only. It requires a completed and confirmed handshake, an
+unused peer connection ID, and a local address different from the current path.
+
+=head2 path_validation_status
+
+    my $validation = $connection->path_validation_status;
+
+Returns C<none> when no path validation has been observed.
+
+Otherwise returns:
+
+    {
+        status            => 'validating',
+        local             => $packed_local_address,
+        peer              => $packed_peer_address,
+        preferred_address => 0,
+        new_token         => 0,
+    }
+
+C<status> is one of:
+
+    validating
+    succeeded
+    failed
+    aborted
+
+The same state is available on server Connections when a peer causes path
+validation. C<preferred_address> and C<new_token> expose the corresponding
+ngtcp2 path-validation flags for later preferred-address and NEW_TOKEN support.
 
 =head1 OPENING STREAMS
 

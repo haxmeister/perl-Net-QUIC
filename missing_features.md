@@ -9,15 +9,6 @@ but Net::QUIC does not yet expose.
 
 ## Base QUIC and TLS features not yet implemented
 
-### ECN
-
-Net::QUIC does not currently:
-
-- receive ECN markings from UDP ancillary data
-- pass received ECN information into ngtcp2
-- select ECN markings for outgoing packets
-- expose ECN validation or state
-
 ### TLS client-certificate authentication
 
 The client verifies the server certificate today.
@@ -68,14 +59,6 @@ unreliable, unordered application datagrams carried inside a QUIC connection.
 This is distinct from Net::QUIC::Datagram, which represents the UDP packets
 that carry QUIC itself.
 
-### Compatible Version Negotiation
-
-The server can already generate Version Negotiation packets and advertises QUIC
-v1 and v2.
-
-Net::QUIC does not yet expose the complete compatible-version-negotiation flow
-or its associated transport parameters.
-
 ### QUIC bit greasing
 
 Net::QUIC does not currently expose or deliberately configure QUIC-bit
@@ -100,9 +83,8 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. ECN
-2. QUIC DATAGRAM
-3. qlog and advanced congestion-control configuration
+1. QUIC DATAGRAM
+2. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -111,6 +93,11 @@ The following should not be treated as missing:
 - QUIC v1 transport
 - server acceptance of negotiated QUIC versions
 - Version Negotiation responses
+- direct QUIC v2 client/server transport
+- RFC 9368 Compatible Version Negotiation for QUIC v1 and v2
+- client first-flight version selection and server compatible-version preference
+- negotiated/client-chosen version introspection
+- version-scoped session tickets, NEW_TOKEN, and 0-RTT state
 - TLS 1.3
 - TLS session resumption
 - opaque client session ticket save/reuse with full-handshake fallback
@@ -150,6 +137,9 @@ The following should not be treated as missing:
 - ngtcp2 PMTU discovery on established paths
 - PMTU discovery restart after validated path changes
 - Connection->path_max_udp_payload_size visibility
+- ECN transmit marking through Datagram->ecn
+- optional received ECN metadata through Endpoint and Driver
+- native ngtcp2 ECN validation and automatic fallback to Not-ECT
 - anti-amplification handling through ngtcp2
 - connection IDs
 - connection ID routing and retirement

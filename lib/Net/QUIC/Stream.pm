@@ -106,6 +106,11 @@ sub closed {
     return $self->{connection}->_stream_closed($self->{id});
 }
 
+sub early_data {
+    my ($self) = @_;
+    return $self->{connection}->_stream_early_data($self->{id});
+}
+
 sub remote_reset_code {
     my ($self) = @_;
     return $self->{connection}->_stream_remote_reset_code($self->{id});

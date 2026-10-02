@@ -17,7 +17,6 @@ LICENSE
 Makefile.PL
 MANIFEST
 MANIFEST.SKIP
-missing_features.md
 QUIC.xs
 README.md
 t/00-load.t

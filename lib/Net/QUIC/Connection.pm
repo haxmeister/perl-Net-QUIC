@@ -376,6 +376,24 @@ The ticket is opaque. Applications should not parse or modify it.
 Net::QUIC does not enable 0-RTT merely because a session ticket is supplied.
 This method currently provides handshake resumption only.
 
+=head2 address_token
+
+    my $token = $connection->address_token;
+
+Returns the newest opaque QUIC address-validation token received through a
+NEW_TOKEN frame, or undef if none has been received.
+
+A server Endpoint with C<validate_address =E<gt> 1> automatically issues a
+NEW_TOKEN after address validation and handshake completion. Save the returned
+byte string and pass it as C<address_token> on a later client Endpoint or
+Driver connection.
+
+A valid token lets the server validate the client's source address without
+requiring another Retry round trip. The token is independent of TLS session
+tickets and can be cached alongside them.
+
+Address tokens are opaque. Applications should not parse or modify them.
+
 =head1 NETWORK PATHS
 
 =head2 path

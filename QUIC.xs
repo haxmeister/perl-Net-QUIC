@@ -380,7 +380,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef, address_token_sv = &PL_sv_undef)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -390,6 +390,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
     SV *transport_sv
     SV *session_ticket_sv
     SV *early_transport_sv
+    SV *address_token_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -399,6 +400,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         const char *ca_file;
         const char *session_ticket = NULL;
         const char *early_transport = NULL;
+        const char *address_token = NULL;
         STRLEN locallen;
         STRLEN peerlen;
         STRLEN alpnlen;
@@ -406,6 +408,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         STRLEN ca_file_len;
         STRLEN session_ticket_len = 0;
         STRLEN early_transport_len = 0;
+        STRLEN address_token_len = 0;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
         ngtcp2_transport_params params;
@@ -433,6 +436,12 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
             }
             if (session_ticket == NULL) {
                 croak("early-data transport state requires a session ticket");
+            }
+        }
+        if (SvOK(address_token_sv)) {
+            address_token = SvPVbyte(address_token_sv, address_token_len);
+            if (address_token_len == 0) {
+                croak("address_token cannot be empty");
             }
         }
 
@@ -518,6 +527,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
         callbacks.recv_retry = ngtcp2_crypto_recv_retry_cb;
+        callbacks.recv_new_token = net_quic_recv_new_token_cb;
         callbacks.rand = net_quic_rand_cb;
         callbacks.update_key = ngtcp2_crypto_update_key_cb;
         callbacks.delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb;
@@ -541,6 +551,12 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
 
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
+
+        if (address_token != NULL) {
+            settings.token = (const uint8_t *)address_token;
+            settings.tokenlen = (size_t)address_token_len;
+            settings.token_type = NGTCP2_TOKEN_TYPE_NEW_TOKEN;
+        }
 
         ngtcp2_transport_params_default(&params);
         net_quic_apply_transport_config(&settings, &params, transport_sv);
@@ -2282,6 +2298,26 @@ session_ticket(self)
             RETVAL = newSVpvn(
                 (const char *)ep->session_ticket,
                 (STRLEN)ep->session_ticket_len
+            );
+        }
+    OUTPUT:
+        RETVAL
+
+
+SV *
+address_token(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (ep->address_token == NULL || ep->address_token_len == 0) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVpvn(
+                (const char *)ep->address_token,
+                (STRLEN)ep->address_token_len
             );
         }
     OUTPUT:

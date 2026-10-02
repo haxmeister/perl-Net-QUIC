@@ -385,6 +385,26 @@ Application work that requires an established connection should wait for
 C<ready>, unless the client deliberately opened a replay-safe 0-RTT stream
 using saved early-data state.
 
+=head2 client_chosen_version
+
+    my $first_version = $connection->client_chosen_version;
+
+Returns C<1> or C<2> for the version selected by the client for its first
+Initial packet.
+
+This can differ from L</version> after Compatible Version Negotiation.
+
+=head2 version
+
+    my $version = $connection->version;
+
+Returns the authenticated negotiated QUIC version, C<1> or C<2>. Before
+version negotiation has completed it can return undef.
+
+For example, a default v1 client connected to a server with
+C<preferred_version =E<gt> 2> keeps C<client_chosen_version> equal to C<1>
+while C<version> becomes C<2>.
+
 =head2 early_data_state
 
     my $state = $connection->early_data_state;
@@ -457,7 +477,9 @@ The application may store this byte string and pass it as C<session_ticket> on
 a later client Endpoint or Driver connection to the same server identity and
 ALPN.
 
-The ticket is opaque. Applications should not parse or modify it.
+The ticket is opaque. Applications should not parse or modify it. Net::QUIC
+records its QUIC version inside the opaque value and only reuses it with that
+version.
 
 Net::QUIC does not enable 0-RTT merely because a session ticket is supplied.
 This method currently provides handshake resumption only.
@@ -479,6 +501,8 @@ requiring another Retry round trip. The token is independent of TLS session
 tickets and can be cached alongside them.
 
 Address tokens are opaque. Applications should not parse or modify them.
+Net::QUIC records their QUIC version inside the opaque value and verifies the
+native token with a version-specific server secret.
 
 =head1 NETWORK PATHS
 

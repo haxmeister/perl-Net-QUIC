@@ -380,7 +380,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef, address_token_sv = &PL_sv_undef)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -390,6 +390,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
     SV *transport_sv
     SV *session_ticket_sv
     SV *early_transport_sv
+    SV *address_token_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -399,6 +400,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         const char *ca_file;
         const char *session_ticket = NULL;
         const char *early_transport = NULL;
+        const char *address_token = NULL;
         STRLEN locallen;
         STRLEN peerlen;
         STRLEN alpnlen;
@@ -406,6 +408,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         STRLEN ca_file_len;
         STRLEN session_ticket_len = 0;
         STRLEN early_transport_len = 0;
+        STRLEN address_token_len = 0;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
         ngtcp2_transport_params params;
@@ -433,6 +436,12 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
             }
             if (session_ticket == NULL) {
                 croak("early-data transport state requires a session ticket");
+            }
+        }
+        if (SvOK(address_token_sv)) {
+            address_token = SvPVbyte(address_token_sv, address_token_len);
+            if (address_token_len == 0) {
+                croak("address_token cannot be empty");
             }
         }
 
@@ -518,6 +527,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
         callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
         callbacks.recv_retry = ngtcp2_crypto_recv_retry_cb;
+        callbacks.recv_new_token = net_quic_recv_new_token_cb;
         callbacks.rand = net_quic_rand_cb;
         callbacks.update_key = ngtcp2_crypto_update_key_cb;
         callbacks.delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb;
@@ -541,6 +551,12 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
 
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
+
+        if (address_token != NULL) {
+            settings.token = (const uint8_t *)address_token;
+            settings.tokenlen = (size_t)address_token_len;
+            settings.token_type = NGTCP2_TOKEN_TYPE_NEW_TOKEN;
+        }
 
         ngtcp2_transport_params_default(&params);
         net_quic_apply_transport_config(&settings, &params, transport_sv);
@@ -594,7 +610,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef, validated_token_type = 0, issue_new_token = 0)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -605,6 +621,8 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *server_secret_sv
     SV *transport_sv
     SV *preferred_address_sv
+    int validated_token_type
+    int issue_new_token
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -704,6 +722,14 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
             croak("unable to allocate Net::QUIC::Connection");
         }
         ep->is_server = 1;
+        ep->issue_new_token = issue_new_token ? 1 : 0;
+
+        if (validated_token_type != NGTCP2_TOKEN_TYPE_UNKNOWN &&
+            validated_token_type != NGTCP2_TOKEN_TYPE_RETRY &&
+            validated_token_type != NGTCP2_TOKEN_TYPE_NEW_TOKEN) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("invalid validated token type");
+        }
 
         if (server_secret_data != NULL) {
             memcpy(
@@ -799,14 +825,21 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
 
-        if (odcid_data != NULL) {
+        if (validated_token_type != NGTCP2_TOKEN_TYPE_UNKNOWN) {
             if (hd.tokenlen == 0) {
                 net_quic_connection_free(aTHX_ ep);
-                croak("Retry-validated connection is missing its token");
+                croak("validated connection is missing its token");
             }
+
+            if (odcid_data != NULL &&
+                validated_token_type != NGTCP2_TOKEN_TYPE_RETRY) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("original destination CID requires a Retry token");
+            }
+
             settings.token = hd.token;
             settings.tokenlen = hd.tokenlen;
-            settings.token_type = NGTCP2_TOKEN_TYPE_RETRY;
+            settings.token_type = (ngtcp2_token_type)validated_token_type;
         }
 
         ngtcp2_transport_params_default(&params);
@@ -2289,6 +2322,26 @@ session_ticket(self)
 
 
 SV *
+address_token(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (ep->address_token == NULL || ep->address_token_len == 0) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVpvn(
+                (const char *)ep->address_token,
+                (STRLEN)ep->address_token_len
+            );
+        }
+    OUTPUT:
+        RETVAL
+
+
+SV *
 _early_data_transport_params(self)
     SV *self
     PREINIT:
@@ -2765,6 +2818,10 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                                 (STRLEN)odcid.datalen
                             )
                         );
+                        av_push(
+                            av,
+                            newSViv(NGTCP2_TOKEN_TYPE_RETRY)
+                        );
                         RETVAL = newRV_noinc((SV *)av);
                     } else {
                         nwrite = ngtcp2_crypto_write_connection_close(
@@ -2790,6 +2847,93 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                                 )
                             );
                         }
+                        RETVAL = newRV_noinc((SV *)av);
+                    }
+                } else if (
+                    hd.tokenlen != 0 &&
+                    hd.token[0] == NGTCP2_CRYPTO_TOKEN_MAGIC_REGULAR
+                ) {
+                    now = net_quic_system_now();
+
+                    rv = ngtcp2_crypto_verify_regular_token(
+                        hd.token,
+                        hd.tokenlen,
+                        (const uint8_t *)secret,
+                        (size_t)secretlen,
+                        &peer_addr.sa,
+                        peer_addrlen,
+                        NET_QUIC_NEW_TOKEN_TIMEOUT,
+                        now
+                    );
+
+                    if (rv == 0) {
+                        av_push(av, newSViv(2));
+                        av_push(av, newSV(0));
+                        av_push(
+                            av,
+                            newSViv(NGTCP2_TOKEN_TYPE_NEW_TOKEN)
+                        );
+                        RETVAL = newRV_noinc((SV *)av);
+                    } else if (validate_address) {
+                        /*
+                         * An invalid NEW_TOKEN is not a fatal token error.
+                         * Treat the address as unvalidated and use Retry.
+                         */
+                        retry_scid.datalen = NET_QUIC_SERVER_CIDLEN;
+                        if (net_quic_random_bytes(
+                                retry_scid.data,
+                                retry_scid.datalen
+                            ) != 0) {
+                            croak("unable to generate Retry connection ID");
+                        }
+
+                        tokenlen = ngtcp2_crypto_generate_retry_token2(
+                            token,
+                            (const uint8_t *)secret,
+                            (size_t)secretlen,
+                            hd.version,
+                            &peer_addr.sa,
+                            peer_addrlen,
+                            &retry_scid,
+                            &hd.dcid,
+                            now
+                        );
+
+                        if (tokenlen < 0) {
+                            croak("unable to generate QUIC Retry token");
+                        }
+
+                        nwrite = ngtcp2_crypto_write_retry(
+                            response,
+                            sizeof(response),
+                            hd.version,
+                            &hd.scid,
+                            &retry_scid,
+                            &hd.dcid,
+                            token,
+                            (size_t)tokenlen
+                        );
+
+                        if (nwrite < 0) {
+                            croak("unable to write QUIC Retry packet");
+                        }
+
+                        av_push(av, newSViv(1));
+                        av_push(
+                            av,
+                            newSVpvn(
+                                (const char *)response,
+                                (STRLEN)nwrite
+                            )
+                        );
+                        RETVAL = newRV_noinc((SV *)av);
+                    } else {
+                        av_push(av, newSViv(2));
+                        av_push(av, newSV(0));
+                        av_push(
+                            av,
+                            newSViv(NGTCP2_TOKEN_TYPE_UNKNOWN)
+                        );
                         RETVAL = newRV_noinc((SV *)av);
                     }
                 } else if (hd.tokenlen != 0 && validate_address) {
@@ -2842,6 +2986,10 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                 } else {
                     av_push(av, newSViv(2));
                     av_push(av, newSV(0));
+                    av_push(
+                        av,
+                        newSViv(NGTCP2_TOKEN_TYPE_UNKNOWN)
+                    );
                     RETVAL = newRV_noinc((SV *)av);
                 }
             }

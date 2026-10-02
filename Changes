@@ -1,6 +1,12 @@
 Revision history for Net-QUIC
 
 Unreleased
+    - Add NEW_TOKEN address-validation reuse for future client connections.
+    - Add Connection->address_token and client address_token => $token.
+    - Automatically issue NEW_TOKEN after validated server handshakes and
+      after validated peer path changes that request a fresh token.
+    - Accept valid NEW_TOKEN on the stateless front door without another Retry.
+    - Treat invalid NEW_TOKEN as an unvalidated address and fall back to Retry.
     - Add validated client connection migration to a new local network path.
     - Add Connection->path, Connection->path_validation, and
       Connection->path_validation_status.

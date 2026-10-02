@@ -114,8 +114,19 @@ Recommended implementation order:
    - BSD/macOS sockaddr length normalization is handled explicitly.
    - Final code checkpoint CI: 15/15 PASS.
 
-5. Finish the remaining version/path network features. NEXT.
-   - NEW_TOKEN support for future-connection address validation.
+5. Finish the remaining version/path network features. IN PROGRESS.
+   - NEW_TOKEN support for future-connection address validation is complete in
+     PR #18:
+       * Connection->address_token exposes the newest opaque token.
+       * clients reuse it with address_token => $token.
+       * validate_address servers issue NEW_TOKEN automatically after a
+         validated handshake and after qualifying peer path validation.
+       * valid NEW_TOKEN avoids another Retry round trip.
+       * invalid NEW_TOKEN falls back to Retry rather than becoming a fatal
+         token error.
+       * tokens use ngtcp2's regular-token format, the Endpoint server secret,
+         IP-address binding, and a 24-hour lifetime.
+       * final CI matrix: 15/15 PASS.
    - Verify the PMTU discovery already enabled by ngtcp2 and expose per-path
      packet-size state only if it is useful.
    - ECN receive/transmit plumbing and validation state.

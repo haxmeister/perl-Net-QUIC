@@ -340,6 +340,30 @@ to require QUIC Retry/address validation before allocating a new Connection.
 Without that option, address validation is off and the extra Retry round trip
 is avoided.
 
+When address validation is enabled, a validated connection automatically
+receives a NEW_TOKEN after the handshake:
+
+```perl
+my $token = $connection->address_token;
+```
+
+A later connection from the same client IP can offer it:
+
+```perl
+my $driver = Net::QUIC::Driver->client(
+    ...
+    address_token => $token,
+);
+```
+
+A valid token avoids another Retry round trip. The token is opaque, independent
+of TLS session resumption, and currently valid for 24 hours. It is bound to the
+client IP address rather than the UDP source port.
+
+If the token is invalid for the new address, the server treats the address as
+unvalidated and falls back to Retry rather than failing the connection solely
+because the NEW_TOKEN was unusable.
+
 ## Sending on a stream
 
 Open a bidirectional stream:

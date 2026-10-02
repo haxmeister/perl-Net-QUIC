@@ -47,6 +47,7 @@ t/22-early-data.t
 t/23-path-migration.t
 t/24-preferred-address.t
 t/25-new-token.t
+t/26-pmtud.t
 t/data/server-cert.pem
 t/data/server-key.pem
 xs/net_quic_connection.h

@@ -1,6 +1,10 @@
 Revision history for Net-QUIC
 
 Unreleased
+    - Verify that ngtcp2 PMTU discovery is active on established paths and
+      restarts after validated path migration.
+    - Add Connection->path_max_udp_payload_size for the discovered current-path
+      UDP payload ceiling.
     - Add NEW_TOKEN address-validation reuse for future client connections.
     - Add Connection->address_token and client address_token => $token.
     - Automatically issue NEW_TOKEN after validated server handshakes and

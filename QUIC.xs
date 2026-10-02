@@ -2202,6 +2202,17 @@ _migrate(self, local_sv)
             croak("unable to start QUIC migration: %s", ngtcp2_strerror(rv));
         }
 
+UV
+path_max_udp_payload_size(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = (UV)ngtcp2_conn_get_path_max_tx_udp_payload_size2(ep->conn);
+    OUTPUT:
+        RETVAL
+
 SV *
 _path(self)
     SV *self

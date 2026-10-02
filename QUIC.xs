@@ -315,10 +315,11 @@ _crypto_self_test()
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::_ServerTLS
 
 SV *
-_new(class, cert_file_sv, key_file_sv)
+_new(class, cert_file_sv, key_file_sv, accept_early_data = 0)
     const char *class
     SV *cert_file_sv
     SV *key_file_sv
+    int accept_early_data
     PREINIT:
         net_quic_server_tls *tls = NULL;
         const char *cert_file;
@@ -341,7 +342,12 @@ _new(class, cert_file_sv, key_file_sv)
             croak("unable to allocate shared server TLS context");
         }
 
-        tls_error = net_quic_server_tls_init(tls, cert_file, key_file);
+        tls_error = net_quic_server_tls_init(
+            tls,
+            cert_file,
+            key_file,
+            accept_early_data ? 1 : 0
+        );
         if (tls_error != NULL) {
             net_quic_server_tls_dispose(tls);
             Safefree(tls);
@@ -505,6 +511,8 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         callbacks.delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb;
         callbacks.delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb;
         callbacks.version_negotiation = ngtcp2_crypto_version_negotiation_cb;
+        callbacks.tls_early_data_rejected =
+            net_quic_tls_early_data_rejected_cb;
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
 

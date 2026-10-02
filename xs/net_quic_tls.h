@@ -32,6 +32,9 @@ struct net_quic_ticket_encryptor {
     ptls_encrypt_ticket_t super;
     uint8_t key_name[NET_QUIC_TICKET_KEY_NAME_LEN];
     uint8_t key[NET_QUIC_TICKET_KEY_LEN];
+    uint64_t *used_tickets;
+    size_t used_tickets_capacity;
+    size_t used_tickets_count;
 };
 
 struct net_quic_server_tls {
@@ -249,6 +252,130 @@ Exit:
     return ret;
 }
 
+static uint64_t
+net_quic_tls_ticket_fingerprint(ptls_iovec_t ticket)
+{
+    uint8_t digest[32];
+    unsigned int digest_len = 0;
+    uint64_t value;
+
+    if (EVP_Digest(
+            ticket.base,
+            ticket.len,
+            digest,
+            &digest_len,
+            EVP_sha256(),
+            NULL
+        ) != 1 ||
+        digest_len != sizeof(digest)) {
+        return 0;
+    }
+
+    memcpy(&value, digest, sizeof(value));
+    ptls_clear_memory(digest, sizeof(digest));
+
+    return value != 0 ? value : 1;
+}
+
+static size_t
+net_quic_tls_ticket_slot(uint64_t value, size_t capacity)
+{
+    value ^= value >> 30;
+    value *= UINT64_C(0xbf58476d1ce4e5b9);
+    value ^= value >> 27;
+    value *= UINT64_C(0x94d049bb133111eb);
+    value ^= value >> 31;
+
+    return (size_t)value & (capacity - 1);
+}
+
+static int
+net_quic_tls_ticket_replay_insert_raw(
+    uint64_t *table,
+    size_t capacity,
+    uint64_t value
+)
+{
+    size_t slot = net_quic_tls_ticket_slot(value, capacity);
+
+    while (table[slot] != 0) {
+        if (table[slot] == value) {
+            return 1;
+        }
+        slot = (slot + 1) & (capacity - 1);
+    }
+
+    table[slot] = value;
+    return 0;
+}
+
+static int
+net_quic_tls_ticket_replay_check(
+    net_quic_ticket_encryptor *self,
+    ptls_iovec_t ticket
+)
+{
+    uint64_t value;
+    uint64_t *new_table;
+    size_t new_capacity;
+    size_t i;
+
+    value = net_quic_tls_ticket_fingerprint(ticket);
+    if (value == 0) {
+        return -1;
+    }
+
+    if (self->used_tickets_capacity == 0) {
+        self->used_tickets_capacity = 1024;
+        self->used_tickets = calloc(
+            self->used_tickets_capacity,
+            sizeof(*self->used_tickets)
+        );
+        if (self->used_tickets == NULL) {
+            self->used_tickets_capacity = 0;
+            return -1;
+        }
+    } else if (
+        (self->used_tickets_count + 1) * 10
+            >= self->used_tickets_capacity * 7
+    ) {
+        if (self->used_tickets_capacity > SIZE_MAX / 2) {
+            return -1;
+        }
+
+        new_capacity = self->used_tickets_capacity * 2;
+        new_table = calloc(new_capacity, sizeof(*new_table));
+        if (new_table == NULL) {
+            return -1;
+        }
+
+        for (i = 0; i < self->used_tickets_capacity; ++i) {
+            if (self->used_tickets[i] != 0) {
+                (void)net_quic_tls_ticket_replay_insert_raw(
+                    new_table,
+                    new_capacity,
+                    self->used_tickets[i]
+                );
+            }
+        }
+
+        free(self->used_tickets);
+        self->used_tickets = new_table;
+        self->used_tickets_capacity = new_capacity;
+    }
+
+    if (net_quic_tls_ticket_replay_insert_raw(
+            self->used_tickets,
+            self->used_tickets_capacity,
+            value
+        )) {
+        return 1;
+    }
+
+    ++self->used_tickets_count;
+    return 0;
+}
+
 static int
 net_quic_tls_encrypt_ticket(
     ptls_encrypt_ticket_t *base,
@@ -261,11 +388,36 @@ net_quic_tls_encrypt_ticket(
     net_quic_ticket_encryptor *self =
         (net_quic_ticket_encryptor *)base;
 
+    int rv;
+    int replay;
+
     (void)ptls;
 
-    return is_encrypt
-        ? net_quic_tls_ticket_encrypt(self, dst, src)
-        : net_quic_tls_ticket_decrypt(self, dst, src);
+    if (is_encrypt) {
+        return net_quic_tls_ticket_encrypt(self, dst, src);
+    }
+
+    rv = net_quic_tls_ticket_decrypt(self, dst, src);
+    if (rv != 0) {
+        return rv;
+    }
+
+    if (self->used_tickets_capacity == 0 &&
+        self->used_tickets_count != 0) {
+        return PTLS_ERROR_REJECT_EARLY_DATA;
+    }
+
+    replay = net_quic_tls_ticket_replay_check(self, src);
+    if (replay != 0) {
+        /*
+         * The ticket decrypted successfully, so TLS resumption remains
+         * available.  Refuse only 0-RTT when the ticket was already used or
+         * when replay tracking cannot safely record it.
+         */
+        return PTLS_ERROR_REJECT_EARLY_DATA;
+    }
+
+    return 0;
 }
 
 static int
@@ -554,6 +706,11 @@ net_quic_server_tls_dispose(net_quic_server_tls *tls)
         tls->ticket_encryptor.key_name,
         sizeof(tls->ticket_encryptor.key_name)
     );
+
+    free(tls->ticket_encryptor.used_tickets);
+    tls->ticket_encryptor.used_tickets = NULL;
+    tls->ticket_encryptor.used_tickets_capacity = 0;
+    tls->ticket_encryptor.used_tickets_count = 0;
 }
 
 static const char *

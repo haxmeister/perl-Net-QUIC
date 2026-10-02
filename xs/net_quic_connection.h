@@ -149,6 +149,7 @@ struct net_quic_connection {
     ngtcp2_socklen path_validation_peer_addrlen;
 
     size_t closebuflen;
+    uint8_t close_ecn;
     int closebuf_pending;
     ngtcp2_sockaddr_union close_local_addr;
     ngtcp2_socklen close_local_addrlen;
@@ -1040,7 +1041,8 @@ net_quic_datagram_new(
     const uint8_t *data,
     size_t datalen,
     const ngtcp2_addr *local,
-    const ngtcp2_addr *peer
+    const ngtcp2_addr *peer,
+    uint8_t ecn
 )
 {
     AV *av = newAV();
@@ -1049,6 +1051,7 @@ net_quic_datagram_new(
     av_push(av, newSVpvn((const char *)data, (STRLEN)datalen));
     av_push(av, newSVpvn((const char *)local->addr, (STRLEN)local->addrlen));
     av_push(av, newSVpvn((const char *)peer->addr, (STRLEN)peer->addrlen));
+    av_push(av, newSVuv((UV)(ecn & NGTCP2_ECN_MASK)));
 
     rv = newRV_noinc((SV *)av);
     sv_bless(rv, gv_stashpv("Net::QUIC::Datagram", GV_ADD));

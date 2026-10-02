@@ -28,11 +28,18 @@ static ptls_cipher_suite_t *net_quic_picotls_cipher_suites[] = {
 
 typedef struct net_quic_ticket_encryptor net_quic_ticket_encryptor;
 
+typedef struct net_quic_ticket_replay_entry net_quic_ticket_replay_entry;
+
+struct net_quic_ticket_replay_entry {
+    uint64_t fingerprint;
+    uint64_t expires_at;
+};
+
 struct net_quic_ticket_encryptor {
     ptls_encrypt_ticket_t super;
     uint8_t key_name[NET_QUIC_TICKET_KEY_NAME_LEN];
     uint8_t key[NET_QUIC_TICKET_KEY_LEN];
-    uint64_t *used_tickets;
+    net_quic_ticket_replay_entry *used_tickets;
     size_t used_tickets_capacity;
     size_t used_tickets_count;
 };
@@ -289,23 +296,73 @@ net_quic_tls_ticket_slot(uint64_t value, size_t capacity)
     return (size_t)value & (capacity - 1);
 }
 
-static int
+static void
 net_quic_tls_ticket_replay_insert_raw(
-    uint64_t *table,
+    net_quic_ticket_replay_entry *table,
     size_t capacity,
-    uint64_t value
+    uint64_t fingerprint,
+    uint64_t expires_at
 )
 {
-    size_t slot = net_quic_tls_ticket_slot(value, capacity);
+    size_t slot = net_quic_tls_ticket_slot(fingerprint, capacity);
 
-    while (table[slot] != 0) {
-        if (table[slot] == value) {
-            return 1;
-        }
+    while (table[slot].fingerprint != 0) {
         slot = (slot + 1) & (capacity - 1);
     }
 
-    table[slot] = value;
+    table[slot].fingerprint = fingerprint;
+    table[slot].expires_at = expires_at;
+}
+
+static int
+net_quic_tls_ticket_replay_rebuild(
+    net_quic_ticket_encryptor *self,
+    uint64_t now
+)
+{
+    net_quic_ticket_replay_entry *new_table;
+    size_t new_capacity;
+    size_t live_count = 0;
+    size_t i;
+
+    new_capacity = self->used_tickets_capacity;
+
+    for (i = 0; i < self->used_tickets_capacity; ++i) {
+        if (self->used_tickets[i].fingerprint != 0 &&
+            self->used_tickets[i].expires_at > now) {
+            ++live_count;
+        }
+    }
+
+    if ((live_count + 1) * 10 >= new_capacity * 7) {
+        if (new_capacity > SIZE_MAX / 2) {
+            return -1;
+        }
+        new_capacity *= 2;
+    }
+
+    new_table = calloc(new_capacity, sizeof(*new_table));
+    if (new_table == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < self->used_tickets_capacity; ++i) {
+        if (self->used_tickets[i].fingerprint != 0 &&
+            self->used_tickets[i].expires_at > now) {
+            net_quic_tls_ticket_replay_insert_raw(
+                new_table,
+                new_capacity,
+                self->used_tickets[i].fingerprint,
+                self->used_tickets[i].expires_at
+            );
+        }
+    }
+
+    free(self->used_tickets);
+    self->used_tickets = new_table;
+    self->used_tickets_capacity = new_capacity;
+    self->used_tickets_count = live_count;
+
     return 0;
 }
 
@@ -315,15 +372,23 @@ net_quic_tls_ticket_replay_check(
     ptls_iovec_t ticket
 )
 {
-    uint64_t value;
-    uint64_t *new_table;
-    size_t new_capacity;
-    size_t i;
+    uint64_t fingerprint;
+    uint64_t now;
+    uint64_t expires_at;
+    size_t slot;
+    time_t wall_now;
 
-    value = net_quic_tls_ticket_fingerprint(ticket);
-    if (value == 0) {
+    fingerprint = net_quic_tls_ticket_fingerprint(ticket);
+    if (fingerprint == 0) {
         return -1;
     }
+
+    wall_now = time(NULL);
+    if (wall_now == (time_t)-1) {
+        return -1;
+    }
+    now = (uint64_t)wall_now;
+    expires_at = now + NET_QUIC_TICKET_LIFETIME;
 
     if (self->used_tickets_capacity == 0) {
         self->used_tickets_capacity = 1024;
@@ -335,44 +400,39 @@ net_quic_tls_ticket_replay_check(
             self->used_tickets_capacity = 0;
             return -1;
         }
-    } else if (
-        (self->used_tickets_count + 1) * 10
-            >= self->used_tickets_capacity * 7
-    ) {
-        if (self->used_tickets_capacity > SIZE_MAX / 2) {
-            return -1;
-        }
+    }
 
-        new_capacity = self->used_tickets_capacity * 2;
-        new_table = calloc(new_capacity, sizeof(*new_table));
-        if (new_table == NULL) {
-            return -1;
-        }
+RetryLookup:
+    slot = net_quic_tls_ticket_slot(
+        fingerprint,
+        self->used_tickets_capacity
+    );
 
-        for (i = 0; i < self->used_tickets_capacity; ++i) {
-            if (self->used_tickets[i] != 0) {
-                (void)net_quic_tls_ticket_replay_insert_raw(
-                    new_table,
-                    new_capacity,
-                    self->used_tickets[i]
-                );
+    while (self->used_tickets[slot].fingerprint != 0) {
+        if (self->used_tickets[slot].fingerprint == fingerprint) {
+            if (self->used_tickets[slot].expires_at > now) {
+                return 1;
             }
+
+            self->used_tickets[slot].expires_at = expires_at;
+            return 0;
         }
 
-        free(self->used_tickets);
-        self->used_tickets = new_table;
-        self->used_tickets_capacity = new_capacity;
+        slot = (slot + 1) & (self->used_tickets_capacity - 1);
     }
 
-    if (net_quic_tls_ticket_replay_insert_raw(
-            self->used_tickets,
-            self->used_tickets_capacity,
-            value
-        )) {
-        return 1;
+    if ((self->used_tickets_count + 1) * 10
+            >= self->used_tickets_capacity * 7) {
+        if (net_quic_tls_ticket_replay_rebuild(self, now) != 0) {
+            return -1;
+        }
+        goto RetryLookup;
     }
 
+    self->used_tickets[slot].fingerprint = fingerprint;
+    self->used_tickets[slot].expires_at = expires_at;
     ++self->used_tickets_count;
+
     return 0;
 }
 
@@ -400,11 +460,6 @@ net_quic_tls_encrypt_ticket(
     rv = net_quic_tls_ticket_decrypt(self, dst, src);
     if (rv != 0) {
         return rv;
-    }
-
-    if (self->used_tickets_capacity == 0 &&
-        self->used_tickets_count != 0) {
-        return PTLS_ERROR_REJECT_EARLY_DATA;
     }
 
     replay = net_quic_tls_ticket_replay_check(self, src);

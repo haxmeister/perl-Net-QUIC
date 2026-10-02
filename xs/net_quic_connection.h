@@ -91,6 +91,12 @@ struct net_quic_cid_event {
 #define NET_QUIC_CLOSE_INITIATOR_LOCAL 1
 #define NET_QUIC_CLOSE_INITIATOR_PEER  2
 
+#define NET_QUIC_PATH_VALIDATION_NONE       0
+#define NET_QUIC_PATH_VALIDATION_VALIDATING 1
+#define NET_QUIC_PATH_VALIDATION_SUCCESS    2
+#define NET_QUIC_PATH_VALIDATION_FAILURE    3
+#define NET_QUIC_PATH_VALIDATION_ABORTED    4
+
 struct net_quic_connection {
     ngtcp2_conn *conn;
     ngtcp2_crypto_conn_ref conn_ref;
@@ -127,6 +133,14 @@ struct net_quic_connection {
     uint64_t close_info_code;
     uint64_t close_info_frame_type;
     int close_info_native_error;
+
+    int path_validation_status;
+    uint32_t path_validation_flags;
+    int path_validation_has_path;
+    ngtcp2_sockaddr_union path_validation_local_addr;
+    ngtcp2_socklen path_validation_local_addrlen;
+    ngtcp2_sockaddr_union path_validation_peer_addr;
+    ngtcp2_socklen path_validation_peer_addrlen;
 
     size_t closebuflen;
     int closebuf_pending;
@@ -575,6 +589,104 @@ net_quic_copy_ngtcp2_addr(
     memcpy(dest, src->addr, (size_t)src->addrlen);
     *destlen = src->addrlen;
     return 0;
+}
+
+
+static int
+net_quic_record_path_validation(
+    net_quic_connection *ep,
+    int status,
+    uint32_t flags,
+    const ngtcp2_path *path
+)
+{
+    ep->path_validation_status = status;
+    ep->path_validation_flags = flags;
+    ep->path_validation_has_path = 0;
+
+    if (path == NULL) {
+        return 0;
+    }
+
+    if (net_quic_copy_ngtcp2_addr(
+            &ep->path_validation_local_addr,
+            &ep->path_validation_local_addrlen,
+            &path->local
+        ) != 0 ||
+        net_quic_copy_ngtcp2_addr(
+            &ep->path_validation_peer_addr,
+            &ep->path_validation_peer_addrlen,
+            &path->remote
+        ) != 0) {
+        return -1;
+    }
+
+    ep->path_validation_has_path = 1;
+    return 0;
+}
+
+static int
+net_quic_begin_path_validation_cb(
+    ngtcp2_conn *conn,
+    uint32_t flags,
+    const ngtcp2_path *path,
+    const ngtcp2_path *fallback_path,
+    void *user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+
+    (void)conn;
+    (void)fallback_path;
+
+    return net_quic_record_path_validation(
+        ep,
+        NET_QUIC_PATH_VALIDATION_VALIDATING,
+        flags,
+        path
+    ) == 0
+        ? 0
+        : NGTCP2_ERR_CALLBACK_FAILURE;
+}
+
+static int
+net_quic_path_validation_cb(
+    ngtcp2_conn *conn,
+    uint32_t flags,
+    const ngtcp2_path *path,
+    const ngtcp2_path *fallback_path,
+    ngtcp2_path_validation_result result,
+    void *user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    int status;
+
+    (void)conn;
+    (void)fallback_path;
+
+    switch (result) {
+    case NGTCP2_PATH_VALIDATION_RESULT_SUCCESS:
+        status = NET_QUIC_PATH_VALIDATION_SUCCESS;
+        break;
+    case NGTCP2_PATH_VALIDATION_RESULT_FAILURE:
+        status = NET_QUIC_PATH_VALIDATION_FAILURE;
+        break;
+    case NGTCP2_PATH_VALIDATION_RESULT_ABORTED:
+        status = NET_QUIC_PATH_VALIDATION_ABORTED;
+        break;
+    default:
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    return net_quic_record_path_validation(
+        ep,
+        status,
+        flags,
+        path
+    ) == 0
+        ? 0
+        : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
 static void

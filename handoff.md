@@ -96,19 +96,27 @@ Recommended implementation order:
    - Driver and event-loop adapter APIs did not change.
    - Final CI matrix: 15/15 PASS.
 
-4. Add active migration and full path management. NEXT.
-   - Represent and validate alternative network paths.
-   - Support path probing, validation success/failure, path switching, and
-     active connection migration.
-   - Support server preferred-address behavior as part of this path work.
-   - Preserve the existing architecture in which the adapter owns UDP sockets
-     and Net::QUIC receives exact local/peer addresses.
-   - Complete this path layer before adding features whose state is naturally
-     per-path, especially PMTU and ECN.
+4. Active migration and full path management. COMPLETE.
+   - Implemented in PR #17.
+   - Connection->migrate starts validated client migration to a new local path.
+   - Connection->path exposes the current local/peer network path.
+   - Connection->path_validation_status reports
+     none/validating/succeeded/failed/aborted.
+   - Connection->path_validation exposes the detailed validation path and flags.
+   - Failed migration falls back to the previously validated path.
+   - Existing bidirectional streams continue across successful migration.
+   - Server preferred_address advertises a fresh CID/reset token and the client
+     automatically validates a matching address family before switching.
+   - Preferred-address CIDs use the normal server Endpoint routing table.
+   - Driver and event-loop adapter APIs remain unchanged; Datagram continues to
+     carry the exact source and destination addresses chosen by QUIC.
+   - BSD/macOS sockaddr length normalization is handled explicitly.
+   - Final code checkpoint CI: 15/15 PASS.
 
-5. Finish the remaining version/path network features.
+5. Finish the remaining version/path network features. NEXT.
    - NEW_TOKEN support for future-connection address validation.
-   - PMTU discovery and per-path packet-size state.
+   - Verify the PMTU discovery already enabled by ngtcp2 and expose per-path
+     packet-size state only if it is useful.
    - ECN receive/transmit plumbing and validation state.
    - Complete QUIC v2 client selection and compatible version negotiation.
    - These belong last because PMTU and ECN should build on the finished path
@@ -133,8 +141,8 @@ The practical sequence is therefore:
     Stream abort semantics                         COMPLETE
         -> Session resumption                     COMPLETE
         -> 0-RTT                                  COMPLETE
-        -> Migration/path management              NEXT
-        -> NEW_TOKEN + PMTU + ECN + complete version negotiation
+        -> Migration/path management              COMPLETE
+        -> NEW_TOKEN + PMTU + ECN + complete version negotiation   NEXT
 
 This order deliberately keeps the tightly coupled TLS work together, completes
 the Stream API before adding more connection states, and ensures path-dependent

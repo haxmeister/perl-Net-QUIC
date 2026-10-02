@@ -679,6 +679,59 @@ The early-data state is opaque and contains the matching TLS ticket and
 remembered QUIC transport parameters. Cache it for the same server identity and
 ALPN; do not parse or modify it.
 
+## Network paths and migration
+
+A client can migrate an established connection to a different local network
+path without creating a new QUIC connection:
+
+```perl
+$connection->migrate($new_packed_local_address);
+```
+
+Net::QUIC validates the new path with PATH_CHALLENGE/PATH_RESPONSE before
+switching the connection to it.
+
+The current path is available as:
+
+```perl
+my $path = $connection->path;
+
+# {
+#     local => $packed_local_address,
+#     peer  => $packed_peer_address,
+# }
+```
+
+Validation progress is available through:
+
+```perl
+$connection->path_validation_status
+```
+
+which returns `none`, `validating`, `succeeded`, `failed`, or
+`aborted`. `path_validation` returns the same status with the local/peer
+addresses and validation flags.
+
+Migration does not change the Driver API. The adapter still owns the UDP
+sockets and must send each datagram using the exact source and destination in:
+
+```perl
+$datagram->local
+$datagram->peer
+```
+
+A server can optionally advertise another address for the same connection:
+
+```perl
+my $driver = Net::QUIC::Driver->server(
+    ...
+    preferred_address => $packed_server_address,
+);
+```
+
+The adapter must actually receive and send UDP traffic on that address. The
+client validates the advertised address before switching to it.
+
 ## Transport defaults
 
 Client and server constructors accept an optional `transport` hash:
@@ -707,7 +760,8 @@ is consumed.
 The stream counts are initial concurrent peer-stream limits. Stream credit is
 returned as peer streams close.
 
-Active connection migration is currently advertised as disabled.
+Active connection migration is advertised as supported. It is transport
+behavior rather than a constructor tuning knob.
 
 ACK timing, congestion control, PMTU policy, packet-size shaping, and
 connection-ID management remain Net::QUIC/ngtcp2 policy rather than public
@@ -757,7 +811,6 @@ The first transport release does not need to include later QUIC features such
 as:
 
 ```text
-connection migration
 QUIC DATAGRAM
 qlog
 ECN exposure

@@ -9,38 +9,20 @@ but Net::QUIC does not yet expose.
 
 ## Base QUIC and TLS features not yet implemented
 
-### Active connection migration
-
-Net::QUIC currently advertises active migration as disabled.
-
-There is no public API for moving an established connection to a different
-local address, interface, socket, or peer path.
-
-### Path management and validation
-
-Net::QUIC does not currently expose path probing, path validation state, path
-failure, path selection, or path switching.
-
-ngtcp2 already provides underlying path machinery, but Net::QUIC does not yet
-turn it into a supported public feature.
-
-### Server preferred address
-
-A server cannot advertise a preferred address and a client cannot validate and
-move to that address after the handshake.
-
 ### NEW_TOKEN support
 
 Net::QUIC supports Retry and Retry-token address validation, but it does not
 yet implement the separate NEW_TOKEN mechanism for giving a client a token it
 can use on a future connection.
 
-### PMTU discovery
+### PMTU discovery and visibility
 
-Net::QUIC does not actively discover and maintain the largest safe UDP payload
-for each network path.
+ngtcp2 PMTU discovery is already enabled by its default settings, and ngtcp2
+restarts PMTU discovery after a validated path change.
 
-Packet sizing and PMTU policy currently remain internal.
+Net::QUIC has not yet added focused PMTU tests or exposed the discovered
+per-path maximum UDP payload size. Project 5 should verify the existing native
+behavior before deciding whether any additional public API is needed.
 
 ### ECN
 
@@ -141,13 +123,12 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. active migration and path management
-2. QUIC DATAGRAM
-3. preferred address and NEW_TOKEN
-4. PMTU discovery
-5. ECN
-6. complete QUIC v2 / compatible version negotiation
-7. qlog and advanced congestion-control configuration
+1. NEW_TOKEN
+2. ECN
+3. complete QUIC v2 / compatible version negotiation
+4. PMTU discovery verification and visibility
+5. QUIC DATAGRAM
+6. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -164,6 +145,12 @@ The following should not be treated as missing:
 - explicit server early-data opt-in
 - 0-RTT rejection rollback
 - per-server 0-RTT replay protection
+- active client connection migration
+- path validation success/failure/abort reporting
+- fallback to the previous validated path after migration failure
+- server observation of peer path validation
+- server preferred address advertisement and client validation
+- preferred-address Connection ID routing
 - ALPN
 - server certificate verification
 - optional private CA files

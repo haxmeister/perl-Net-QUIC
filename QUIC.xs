@@ -142,7 +142,7 @@ net_quic_apply_transport_config(
         params->initial_max_streams_bidi = 100;
         params->initial_max_streams_uni = 100;
         params->active_connection_id_limit = 4;
-        params->disable_active_migration = 1;
+        params->disable_active_migration = 0;
         return;
     }
 
@@ -196,7 +196,7 @@ net_quic_apply_transport_config(
     params->initial_max_streams_bidi = max_bidi_streams;
     params->initial_max_streams_uni = max_uni_streams;
     params->active_connection_id_limit = 4;
-    params->disable_active_migration = 1;
+    params->disable_active_migration = 0;
 }
 
 static net_quic_server_tls *
@@ -527,6 +527,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
             net_quic_tls_early_data_rejected_cb;
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
+        callbacks.begin_path_validation = net_quic_begin_path_validation_cb;
+        callbacks.path_validation = net_quic_path_validation_cb;
+        callbacks.select_preferred_addr = net_quic_select_preferred_addr_cb;
 
         if (net_quic_random_bytes(dcid.data, NGTCP2_MIN_INITIAL_DCIDLEN) != 0 ||
             net_quic_random_bytes(scid.data, 16) != 0) {
@@ -591,7 +594,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -601,6 +604,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *odcid_sv
     SV *server_secret_sv
     SV *transport_sv
+    SV *preferred_address_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -616,6 +620,11 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         STRLEN alpnlen;
         const char *odcid_data = NULL;
         STRLEN odcid_len = 0;
+        const char *preferred_address = NULL;
+        STRLEN preferred_address_len = 0;
+        ngtcp2_sockaddr_union preferred_addr_storage;
+        ngtcp2_socklen preferred_addrlen = 0;
+        int preferred_addr_present = 0;
         ngtcp2_version_cid vcid;
         ngtcp2_pkt_hd hd;
         ngtcp2_callbacks callbacks;
@@ -643,6 +652,24 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
             if (odcid_len == 0 || odcid_len > NGTCP2_MAX_CIDLEN) {
                 croak("original destination connection ID has invalid length");
             }
+        }
+        if (SvOK(preferred_address_sv)) {
+            preferred_address = SvPVbyte(
+                preferred_address_sv,
+                preferred_address_len
+            );
+            if (net_quic_copy_sockaddr(
+                    &preferred_addr_storage,
+                    &preferred_addrlen,
+                    preferred_address,
+                    preferred_address_len
+                ) != 0 ||
+                net_quic_sockaddr_is_unspecified(&preferred_addr_storage)) {
+                croak(
+                    "preferred_address must be a concrete packed IPv4 or IPv6 socket address"
+                );
+            }
+            preferred_addr_present = 1;
         }
 
         if (alpnlen == 0 || alpnlen > 255) {
@@ -758,6 +785,8 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.remove_connection_id = net_quic_remove_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
+        callbacks.begin_path_validation = net_quic_begin_path_validation_cb;
+        callbacks.path_validation = net_quic_path_validation_cb;
 
         ngtcp2_cid_init(&dcid, vcid.scid, vcid.scidlen);
 
@@ -793,6 +822,48 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         if (rv != 0) {
             net_quic_connection_free(aTHX_ ep);
             croak("unable to generate server stateless reset token");
+        }
+
+        if (preferred_addr_present) {
+            params.preferred_addr_present = 1;
+            params.preferred_addr.cid.datalen = NET_QUIC_SERVER_CIDLEN;
+
+            if (net_quic_random_bytes(
+                    params.preferred_addr.cid.data,
+                    params.preferred_addr.cid.datalen
+                ) != 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("unable to generate preferred-address connection ID");
+            }
+
+            rv = ngtcp2_crypto_generate_stateless_reset_token(
+                params.preferred_addr.stateless_reset_token,
+                ep->server_secret,
+                sizeof(ep->server_secret),
+                &params.preferred_addr.cid
+            );
+            if (rv != 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("unable to generate preferred-address reset token");
+            }
+
+            if (preferred_addr_storage.sa.sa_family == NGTCP2_AF_INET) {
+                memcpy(
+                    &params.preferred_addr.ipv4,
+                    &preferred_addr_storage.in,
+                    sizeof(params.preferred_addr.ipv4)
+                );
+                params.preferred_addr.ipv4_present = 1;
+            } else if (
+                preferred_addr_storage.sa.sa_family == NGTCP2_AF_INET6
+            ) {
+                memcpy(
+                    &params.preferred_addr.ipv6,
+                    &preferred_addr_storage.in6,
+                    sizeof(params.preferred_addr.ipv6)
+                );
+                params.preferred_addr.ipv6_present = 1;
+            }
         }
 
         if (odcid_data != NULL) {
@@ -834,6 +905,16 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         if (net_quic_queue_cid_event(aTHX_ ep, 1, &scid) != 0) {
             net_quic_connection_free(aTHX_ ep);
             croak("unable to register server QUIC connection ID");
+        }
+
+        if (preferred_addr_present &&
+            net_quic_queue_cid_event(
+                aTHX_ ep,
+                1,
+                &params.preferred_addr.cid
+            ) != 0) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to register preferred-address connection ID");
         }
 
         if (net_quic_tls_server_finish(aTHX_ ep) != 0) {
@@ -2023,6 +2104,145 @@ _transport_info(self)
         );
 
         RETVAL = newRV_noinc((SV *)hv);
+    OUTPUT:
+        RETVAL
+
+void
+_migrate(self, local_sv)
+    SV *self
+    SV *local_sv
+    PREINIT:
+        net_quic_connection *ep;
+        const ngtcp2_path *current;
+        const char *local;
+        STRLEN locallen;
+        ngtcp2_sockaddr_union local_addr;
+        ngtcp2_socklen local_addrlen;
+        ngtcp2_path path;
+        ngtcp2_tstamp now;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (ep->is_server) {
+            croak("only a QUIC client can initiate active migration");
+        }
+        if (!ep->ready) {
+            croak("cannot migrate before the QUIC handshake is ready");
+        }
+
+        local = SvPVbyte(local_sv, locallen);
+        if (net_quic_copy_sockaddr(
+                &local_addr,
+                &local_addrlen,
+                local,
+                locallen
+            ) != 0 ||
+            net_quic_sockaddr_is_unspecified(&local_addr)) {
+            croak("migration local address must be a concrete packed IPv4 or IPv6 socket address");
+        }
+
+        current = ngtcp2_conn_get_path2(ep->conn);
+        if (current == NULL ||
+            current->remote.addr == NULL ||
+            current->remote.addrlen == 0) {
+            croak("QUIC connection has no current network path");
+        }
+
+        memset(&path, 0, sizeof(path));
+        path.local.addr = &local_addr.sa;
+        path.local.addrlen = local_addrlen;
+        path.remote = current->remote;
+
+        now = net_quic_now();
+        rv = ngtcp2_conn_initiate_migration(ep->conn, &path, now);
+        if (rv == NGTCP2_ERR_INVALID_STATE) {
+            croak("cannot migrate before the QUIC handshake is confirmed or while another path transition is active");
+        }
+        if (rv == NGTCP2_ERR_CONN_ID_BLOCKED) {
+            croak("cannot migrate because no unused peer connection ID is available");
+        }
+        if (rv == NGTCP2_ERR_INVALID_ARGUMENT) {
+            croak("migration requires a different local network path");
+        }
+        if (rv != 0) {
+            croak("unable to start QUIC migration: %s", ngtcp2_strerror(rv));
+        }
+
+SV *
+_path(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        const ngtcp2_path *path;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        path = ngtcp2_conn_get_path2(ep->conn);
+
+        if (path == NULL ||
+            path->local.addr == NULL ||
+            path->remote.addr == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            av = newAV();
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)path->local.addr,
+                    (STRLEN)path->local.addrlen
+                )
+            );
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)path->remote.addr,
+                    (STRLEN)path->remote.addrlen
+                )
+            );
+            RETVAL = newRV_noinc((SV *)av);
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+_path_validation(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (ep->path_validation_status == NET_QUIC_PATH_VALIDATION_NONE) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            av = newAV();
+            av_push(av, newSViv(ep->path_validation_status));
+            av_push(av, newSVuv((UV)ep->path_validation_flags));
+
+            if (ep->path_validation_has_path) {
+                av_push(
+                    av,
+                    newSVpvn(
+                        (const char *)&ep->path_validation_local_addr.sa,
+                        (STRLEN)ep->path_validation_local_addrlen
+                    )
+                );
+                av_push(
+                    av,
+                    newSVpvn(
+                        (const char *)&ep->path_validation_peer_addr.sa,
+                        (STRLEN)ep->path_validation_peer_addrlen
+                    )
+                );
+            } else {
+                av_push(av, newSVsv(&PL_sv_undef));
+                av_push(av, newSVsv(&PL_sv_undef));
+            }
+
+            RETVAL = newRV_noinc((SV *)av);
+        }
     OUTPUT:
         RETVAL
 

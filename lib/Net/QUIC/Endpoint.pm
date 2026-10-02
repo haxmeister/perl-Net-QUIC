@@ -286,7 +286,8 @@ sub _route_count {
 }
 
 sub _server_receive_datagram {
-    my ($self, $bytes, $local, $peer) = @_;
+    my ($self, $bytes, $local, $peer, $ecn) = @_;
+    $ecn = 0 if !defined $ecn;
 
     my $dcid = $self->_packet_dcid($bytes, $self->{cid_length});
     return if !defined $dcid;
@@ -327,7 +328,7 @@ sub _server_receive_datagram {
             $self->{preferred_version} // 0,
         );
 
-        $connection->_receive_datagram($bytes, $local, $peer);
+        $connection->_receive_datagram($bytes, $local, $peer, $ecn);
         $connection->_dispatch_stream_availability;
 
         $self->{routes}{$initial_dcid} = $connection;
@@ -338,7 +339,7 @@ sub _server_receive_datagram {
         return;
     }
 
-    $connection->_receive_datagram($bytes, $local, $peer);
+    $connection->_receive_datagram($bytes, $local, $peer, $ecn);
     $connection->_dispatch_stream_availability;
     $self->_sync_server_routes($connection);
     $self->_retire_server_connections;
@@ -424,14 +425,27 @@ sub next_connection {
 }
 
 sub receive_datagram {
-    my ($self, @args) = @_;
+    my ($self, $bytes, $local, $peer, $ecn) = @_;
 
-    __PACKAGE__->_require_concrete_local($args[1]);
+    __PACKAGE__->_require_concrete_local($local);
 
-    return $self->_server_receive_datagram(@args)
-        if $self->{mode} eq 'server';
+    $ecn = 0 if !defined $ecn;
+    croak "ECN codepoint must be an integer from 0 through 3"
+        if ref($ecn) || $ecn !~ /\A[0-3]\z/;
 
-    $self->{connection}->_receive_datagram(@args);
+    return $self->_server_receive_datagram(
+        $bytes,
+        $local,
+        $peer,
+        0 + $ecn,
+    ) if $self->{mode} eq 'server';
+
+    $self->{connection}->_receive_datagram(
+        $bytes,
+        $local,
+        $peer,
+        0 + $ecn,
+    );
     $self->{connection}->_dispatch_stream_availability;
     return;
 }
@@ -527,6 +541,18 @@ They must be IPv4 or IPv6 addresses.
 C<local> must identify the concrete local endpoint for the packet. Wildcard
 bind addresses C<0.0.0.0> and C<::> are rejected because they do not identify
 a QUIC network path.
+
+C<receive_datagram> accepts an optional fourth C<ecn> argument containing the
+two ECN bits read from the received IP header. The values are:
+
+    0   Not-ECT
+    1   ECT(1)
+    2   ECT(0)
+    3   CE
+
+Omitting the argument is equivalent to C<0>. An adapter that can read ECN from
+the socket should pass it so QUIC can report ECN counts and validate ECN on the
+path.
 
 =head1 METHODS
 

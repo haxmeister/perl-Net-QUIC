@@ -114,10 +114,25 @@ sub start {
 }
 
 sub receive {
-    my ($self, $bytes, $local, $peer) = @_;
+    my ($self, $bytes, $local, $peer, $ecn) = @_;
 
     $self->_require_started('receive');
-    $self->{endpoint}->receive_datagram($bytes, $local, $peer);
+
+    if (defined $ecn) {
+        $self->{endpoint}->receive_datagram(
+            $bytes,
+            $local,
+            $peer,
+            $ecn,
+        );
+    } else {
+        $self->{endpoint}->receive_datagram(
+            $bytes,
+            $local,
+            $peer,
+        );
+    }
+
     $self->_service;
     return;
 }
@@ -259,7 +274,7 @@ Net::QUIC::Driver - simple event-loop integration for Net::QUIC
     $driver->start;
 
     # From the UDP receive callback:
-    $driver->receive($bytes, $local, $peer);
+    $driver->receive($bytes, $local, $peer, $ecn);
 
     # From the one-shot timer callback:
     $driver->timeout;
@@ -295,10 +310,17 @@ After startup, the ordinary event-loop inputs are only:
     timeout     the requested QUIC timeout expired
     writable    UDP output can accept more packets again
 
+C<receive> accepts an optional fourth argument containing the two-bit ECN
+codepoint read from the received IP header. Omitting it preserves the old
+three-argument API and means Not-ECT.
+
 The adapter supplies only two operations in the other direction:
 
     send          transmit one complete UDP datagram
     set_timeout   replace or cancel QUIC's one-shot timeout
+
+The C<send> callback receives a L<Net::QUIC::Datagram>. When the adapter supports
+ECN it should set the outgoing IP-header ECN bits from C<$datagram-E<gt>ecn>.
 
 Application stream operations do not require a separate Driver call. When a
 Connection is obtained through the Driver, Net::QUIC installs a private output

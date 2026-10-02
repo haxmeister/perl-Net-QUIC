@@ -104,6 +104,9 @@ struct net_quic_connection {
     size_t session_ticket_len;
     int ready;
     int resumed;
+    int early_data_attempted;
+    int early_data_accepted;
+    int early_data_rejected;
     int is_server;
     int local_bidi_stream_waiting;
     int local_uni_stream_waiting;
@@ -473,6 +476,20 @@ net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
     ep->ready = 1;
     ep->resumed = ep->picotls_ctx.ptls != NULL
         && ptls_is_psk_handshake(ep->picotls_ctx.ptls);
+
+    if (ep->early_data_attempted && ep->picotls_ctx.ptls != NULL) {
+        ptls_early_data_acceptance_t acceptance =
+            ep->picotls_ctx.handshake_properties.client.early_data_acceptance;
+
+        if (acceptance == PTLS_EARLY_DATA_ACCEPTED) {
+            ep->early_data_accepted = 1;
+            ep->early_data_rejected = 0;
+        } else if (acceptance == PTLS_EARLY_DATA_REJECTED) {
+            ep->early_data_accepted = 0;
+            ep->early_data_rejected = 1;
+        }
+    }
+
     return 0;
 }
 

@@ -178,11 +178,11 @@ sub path {
     };
 }
 
-sub path_validation_status {
+sub path_validation {
     my ($self) = @_;
 
     my $state = $self->_path_validation;
-    return 'none' if !defined $state;
+    return { status => 'none' } if !defined $state;
 
     my @status = qw(none validating succeeded failed aborted);
     my $status = $status[$state->[0]];
@@ -197,6 +197,11 @@ sub path_validation_status {
         preferred_address => ($state->[1] & 0x01) ? 1 : 0,
         new_token         => ($state->[1] & 0x02) ? 1 : 0,
     };
+}
+
+sub path_validation_status {
+    my ($self) = @_;
+    return $self->path_validation->{status};
 }
 
 sub early_data_state {
@@ -407,11 +412,21 @@ unused peer connection ID, and a local address different from the current path.
 
 =head2 path_validation_status
 
-    my $validation = $connection->path_validation_status;
+    my $status = $connection->path_validation_status;
 
-Returns C<none> when no path validation has been observed.
+Returns one of:
 
-Otherwise returns:
+    none
+    validating
+    succeeded
+    failed
+    aborted
+
+=head2 path_validation
+
+    my $validation = $connection->path_validation;
+
+Returns the detailed current or most recent path-validation state:
 
     {
         status            => 'validating',
@@ -421,16 +436,13 @@ Otherwise returns:
         new_token         => 0,
     }
 
-C<status> is one of:
+Before any path validation has been observed it returns:
 
-    validating
-    succeeded
-    failed
-    aborted
+    { status => 'none' }
 
 The same state is available on server Connections when a peer causes path
 validation. C<preferred_address> and C<new_token> expose the corresponding
-ngtcp2 path-validation flags for later preferred-address and NEW_TOKEN support.
+ngtcp2 path-validation flags for preferred-address and NEW_TOKEN path work.
 
 =head1 OPENING STREAMS
 

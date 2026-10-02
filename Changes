@@ -5,10 +5,12 @@ Unreleased
     - Add Connection->path, Connection->path_validation, and
       Connection->path_validation_status.
     - Wire ngtcp2 path-validation start/result callbacks for clients and servers.
+    - Add optional server preferred_address advertisement and automatic client
+      validation/selection for a matching address family.
     - Keep migration event-loop neutral: Datagram continues to carry the exact
       local and peer addresses selected by QUIC.
-    - Add a two-path integration test proving PATH_CHALLENGE/PATH_RESPONSE
-      validation and existing-stream continuity across migration.
+    - Add path tests for successful migration, unreachable-path failure with
+      fallback, preferred-address CID routing, and existing-stream continuity.
     - Split stream aborts into independent RESET_STREAM and STOP_SENDING operations.
     - Make Stream->reset abort only the local send side, matching its documented behavior.
     - Add Stream->stop_sending for aborting the local receive side.

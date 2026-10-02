@@ -23,6 +23,7 @@ net_quic_system_free(void *ptr)
 #include "perl.h"
 #include "XSUB.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>

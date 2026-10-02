@@ -117,12 +117,22 @@ sub receive {
     my ($self, $bytes, $local, $peer, $ecn) = @_;
 
     $self->_require_started('receive');
-    $self->{endpoint}->receive_datagram(
-        $bytes,
-        $local,
-        $peer,
-        $ecn,
-    );
+
+    if (defined $ecn) {
+        $self->{endpoint}->receive_datagram(
+            $bytes,
+            $local,
+            $peer,
+            $ecn,
+        );
+    } else {
+        $self->{endpoint}->receive_datagram(
+            $bytes,
+            $local,
+            $peer,
+        );
+    }
+
     $self->_service;
     return;
 }

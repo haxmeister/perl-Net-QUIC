@@ -512,6 +512,15 @@ net_quic_server_tls_dispose(net_quic_server_tls *tls)
     net_quic_system_free(tls->ptls_ctx.certificates.list);
     tls->ptls_ctx.certificates.list = NULL;
     tls->ptls_ctx.certificates.count = 0;
+
+    ptls_clear_memory(
+        tls->ticket_encryptor.key,
+        sizeof(tls->ticket_encryptor.key)
+    );
+    ptls_clear_memory(
+        tls->ticket_encryptor.key_name,
+        sizeof(tls->ticket_encryptor.key_name)
+    );
 }
 
 static const char *

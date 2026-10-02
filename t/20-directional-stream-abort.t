@@ -134,6 +134,13 @@ $reset_client->reset(77);
 is($reset_client->local_reset_code, 77,
     'reset records the local RESET_STREAM code');
 
+$reset_client->reset(78);
+is(
+    $reset_client->local_reset_code,
+    77,
+    'repeated reset preserves the first RESET_STREAM code',
+);
+
 my $after_reset_stats = $client->connection->_stream_tx_stats($reset_id);
 is(
     $after_reset_stats->[1],
@@ -209,6 +216,14 @@ ok(!defined($stop_server->local_stop_sending_code),
 $stop_server->stop_sending(88);
 is($stop_server->local_stop_sending_code, 88,
     'stop_sending records the local STOP_SENDING code');
+
+$stop_server->stop_sending(89);
+is(
+    $stop_server->local_stop_sending_code,
+    88,
+    'repeated stop_sending preserves the first STOP_SENDING code',
+);
+
 ok(!defined($stop_server->next_data),
     'stop_sending discards unread receive data');
 

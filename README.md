@@ -1,5 +1,14 @@
 # Net::QUIC
 
+[![CPAN version](https://badge.fury.io/pl/Net-QUIC.svg)](https://metacpan.org/dist/Net-QUIC)
+[![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Net-QUIC.svg)](https://cpants.cpanauthors.org/dist/Net-QUIC)
+[![CI](https://github.com/haxmeister/perl-Net-QUIC/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Net-QUIC/actions/workflows/test.yml)
+[![License](https://img.shields.io/cpan/l/Net-QUIC.svg)](https://github.com/haxmeister/perl-Net-QUIC/blob/main/LICENSE)
+[![Perl](https://img.shields.io/badge/perl-5.20%2B-blue.svg)](https://www.perl.org/)
+[![ngtcp2](https://img.shields.io/badge/ngtcp2-1.25.0-blue.svg)](https://github.com/ngtcp2/ngtcp2)
+[![QUIC](https://img.shields.io/badge/QUIC-v1%20%2B%20v2-blue.svg)](https://www.rfc-editor.org/rfc/rfc9000)
+
+
 Net::QUIC is a QUIC transport library for Perl.
 
 QUIC is a secure network transport built on UDP. A QUIC connection can carry

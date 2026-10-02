@@ -20,9 +20,24 @@ static ptls_cipher_suite_t *net_quic_picotls_cipher_suites[] = {
     NULL,
 };
 
+#define NET_QUIC_TICKET_KEY_NAME_LEN 16
+#define NET_QUIC_TICKET_KEY_LEN 32
+#define NET_QUIC_TICKET_NONCE_LEN 12
+#define NET_QUIC_TICKET_TAG_LEN 16
+#define NET_QUIC_TICKET_LIFETIME 86400
+
+typedef struct net_quic_ticket_encryptor net_quic_ticket_encryptor;
+
+struct net_quic_ticket_encryptor {
+    ptls_encrypt_ticket_t super;
+    uint8_t key_name[NET_QUIC_TICKET_KEY_NAME_LEN];
+    uint8_t key[NET_QUIC_TICKET_KEY_LEN];
+};
+
 struct net_quic_server_tls {
     ptls_context_t ptls_ctx;
     ptls_openssl_sign_certificate_t sign_cert;
+    net_quic_ticket_encryptor ticket_encryptor;
     int sign_cert_ready;
 };
 
@@ -37,6 +52,248 @@ net_quic_tls_context_defaults(ptls_context_t *ctx)
     ctx->require_dhe_on_psk = 1;
 }
 
+
+static int
+net_quic_tls_ticket_encrypt(
+    net_quic_ticket_encryptor *self,
+    ptls_buffer_t *dst,
+    ptls_iovec_t src
+)
+{
+    EVP_CIPHER_CTX *ctx = NULL;
+    uint8_t *out;
+    uint8_t nonce[NET_QUIC_TICKET_NONCE_LEN];
+    int outlen = 0;
+    int final_len = 0;
+    int aad_len = 0;
+    int ret = PTLS_ERROR_LIBRARY;
+
+    if (net_quic_random_bytes(nonce, sizeof(nonce)) != 0) {
+        return PTLS_ERROR_LIBRARY;
+    }
+
+    if (ptls_buffer_reserve(
+            dst,
+            NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_NONCE_LEN
+                + src.len
+                + NET_QUIC_TICKET_TAG_LEN
+        ) != 0) {
+        return PTLS_ERROR_NO_MEMORY;
+    }
+
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL) {
+        return PTLS_ERROR_NO_MEMORY;
+    }
+
+    out = dst->base + dst->off;
+    memcpy(out, self->key_name, NET_QUIC_TICKET_KEY_NAME_LEN);
+    memcpy(
+        out + NET_QUIC_TICKET_KEY_NAME_LEN,
+        nonce,
+        NET_QUIC_TICKET_NONCE_LEN
+    );
+
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1 ||
+        EVP_CIPHER_CTX_ctrl(
+            ctx,
+            EVP_CTRL_GCM_SET_IVLEN,
+            NET_QUIC_TICKET_NONCE_LEN,
+            NULL
+        ) != 1 ||
+        EVP_EncryptInit_ex(ctx, NULL, NULL, self->key, nonce) != 1 ||
+        EVP_EncryptUpdate(
+            ctx,
+            NULL,
+            &aad_len,
+            self->key_name,
+            NET_QUIC_TICKET_KEY_NAME_LEN
+        ) != 1 ||
+        EVP_EncryptUpdate(
+            ctx,
+            out + NET_QUIC_TICKET_KEY_NAME_LEN + NET_QUIC_TICKET_NONCE_LEN,
+            &outlen,
+            src.base,
+            (int)src.len
+        ) != 1 ||
+        EVP_EncryptFinal_ex(
+            ctx,
+            out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_NONCE_LEN
+                + outlen,
+            &final_len
+        ) != 1 ||
+        EVP_CIPHER_CTX_ctrl(
+            ctx,
+            EVP_CTRL_GCM_GET_TAG,
+            NET_QUIC_TICKET_TAG_LEN,
+            out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_NONCE_LEN
+                + outlen
+                + final_len
+        ) != 1) {
+        goto Exit;
+    }
+
+    dst->off += NET_QUIC_TICKET_KEY_NAME_LEN
+        + NET_QUIC_TICKET_NONCE_LEN
+        + (size_t)outlen
+        + (size_t)final_len
+        + NET_QUIC_TICKET_TAG_LEN;
+    ret = 0;
+
+Exit:
+    EVP_CIPHER_CTX_free(ctx);
+    return ret;
+}
+
+static int
+net_quic_tls_ticket_decrypt(
+    net_quic_ticket_encryptor *self,
+    ptls_buffer_t *dst,
+    ptls_iovec_t src
+)
+{
+    EVP_CIPHER_CTX *ctx = NULL;
+    const uint8_t *nonce;
+    const uint8_t *ciphertext;
+    const uint8_t *tag;
+    size_t ciphertext_len;
+    int outlen = 0;
+    int final_len = 0;
+    int aad_len = 0;
+    int ret = PTLS_ALERT_HANDSHAKE_FAILURE;
+
+    if (src.len < NET_QUIC_TICKET_KEY_NAME_LEN
+            + NET_QUIC_TICKET_NONCE_LEN
+            + NET_QUIC_TICKET_TAG_LEN ||
+        !ptls_mem_equal(
+            src.base,
+            self->key_name,
+            NET_QUIC_TICKET_KEY_NAME_LEN
+        )) {
+        return PTLS_ALERT_HANDSHAKE_FAILURE;
+    }
+
+    nonce = src.base + NET_QUIC_TICKET_KEY_NAME_LEN;
+    ciphertext = nonce + NET_QUIC_TICKET_NONCE_LEN;
+    ciphertext_len = src.len
+        - NET_QUIC_TICKET_KEY_NAME_LEN
+        - NET_QUIC_TICKET_NONCE_LEN
+        - NET_QUIC_TICKET_TAG_LEN;
+    tag = ciphertext + ciphertext_len;
+
+    if (ptls_buffer_reserve(dst, ciphertext_len) != 0) {
+        return PTLS_ERROR_NO_MEMORY;
+    }
+
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL) {
+        return PTLS_ERROR_NO_MEMORY;
+    }
+
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1 ||
+        EVP_CIPHER_CTX_ctrl(
+            ctx,
+            EVP_CTRL_GCM_SET_IVLEN,
+            NET_QUIC_TICKET_NONCE_LEN,
+            NULL
+        ) != 1 ||
+        EVP_DecryptInit_ex(ctx, NULL, NULL, self->key, nonce) != 1 ||
+        EVP_DecryptUpdate(
+            ctx,
+            NULL,
+            &aad_len,
+            self->key_name,
+            NET_QUIC_TICKET_KEY_NAME_LEN
+        ) != 1 ||
+        EVP_DecryptUpdate(
+            ctx,
+            dst->base + dst->off,
+            &outlen,
+            ciphertext,
+            (int)ciphertext_len
+        ) != 1 ||
+        EVP_CIPHER_CTX_ctrl(
+            ctx,
+            EVP_CTRL_GCM_SET_TAG,
+            NET_QUIC_TICKET_TAG_LEN,
+            (void *)tag
+        ) != 1 ||
+        EVP_DecryptFinal_ex(
+            ctx,
+            dst->base + dst->off + outlen,
+            &final_len
+        ) != 1) {
+        goto Exit;
+    }
+
+    dst->off += (size_t)outlen + (size_t)final_len;
+    ret = 0;
+
+Exit:
+    EVP_CIPHER_CTX_free(ctx);
+    return ret;
+}
+
+static int
+net_quic_tls_encrypt_ticket(
+    ptls_encrypt_ticket_t *base,
+    ptls_t *ptls,
+    int is_encrypt,
+    ptls_buffer_t *dst,
+    ptls_iovec_t src
+)
+{
+    net_quic_ticket_encryptor *self =
+        (net_quic_ticket_encryptor *)base;
+
+    (void)ptls;
+
+    return is_encrypt
+        ? net_quic_tls_ticket_encrypt(self, dst, src)
+        : net_quic_tls_ticket_decrypt(self, dst, src);
+}
+
+static int
+net_quic_tls_save_ticket(
+    ptls_save_ticket_t *base,
+    ptls_t *ptls,
+    ptls_iovec_t input
+)
+{
+    dTHX;
+    ngtcp2_crypto_conn_ref *conn_ref;
+    net_quic_connection *ep;
+    uint8_t *copy;
+
+    (void)base;
+
+    conn_ref = (ngtcp2_crypto_conn_ref *)*ptls_get_data_ptr(ptls);
+    if (conn_ref == NULL || conn_ref->user_data == NULL || input.len == 0) {
+        return PTLS_ERROR_LIBRARY;
+    }
+
+    ep = (net_quic_connection *)conn_ref->user_data;
+
+    Newx(copy, input.len, uint8_t);
+    if (copy == NULL) {
+        return PTLS_ERROR_NO_MEMORY;
+    }
+
+    memcpy(copy, input.base, input.len);
+    Safefree(ep->session_ticket);
+    ep->session_ticket = copy;
+    ep->session_ticket_len = input.len;
+
+    return 0;
+}
+
+static ptls_save_ticket_t net_quic_tls_save_ticket_cb = {
+    net_quic_tls_save_ticket
+};
+
 static const char *
 net_quic_tls_client_prepare(net_quic_connection *ep, const char *ca_file)
 {
@@ -45,6 +302,8 @@ net_quic_tls_client_prepare(net_quic_connection *ep, const char *ca_file)
     if (ngtcp2_crypto_picotls_configure_client_context(&ep->ptls_ctx) != 0) {
         return "unable to configure Picotls client context";
     }
+
+    ep->ptls_ctx.save_ticket = &net_quic_tls_save_ticket_cb;
 
     if (ptls_openssl_init_verify_certificate(
             &ep->picotls_verify_cert,
@@ -115,6 +374,11 @@ net_quic_tls_client_finish(pTHX_ net_quic_connection *ep)
         &ep->picotls_alpn;
     ep->picotls_ctx.handshake_properties.client.negotiated_protocols.count = 1;
 
+    if (ep->resume_ticket_len != 0) {
+        ep->picotls_ctx.handshake_properties.client.session_ticket =
+            ptls_iovec_init(ep->resume_ticket, ep->resume_ticket_len);
+    }
+
     if (ep->server_name[0] != '\0' &&
         ptls_set_server_name(
             ep->picotls_ctx.ptls,
@@ -184,6 +448,22 @@ net_quic_server_tls_init(
     if (ngtcp2_crypto_picotls_configure_server_context(&tls->ptls_ctx) != 0) {
         return "unable to configure Picotls server context";
     }
+
+    tls->ticket_encryptor.super.cb = net_quic_tls_encrypt_ticket;
+    if (net_quic_random_bytes(
+            tls->ticket_encryptor.key_name,
+            sizeof(tls->ticket_encryptor.key_name)
+        ) != 0 ||
+        net_quic_random_bytes(
+            tls->ticket_encryptor.key,
+            sizeof(tls->ticket_encryptor.key)
+        ) != 0) {
+        return "unable to generate TLS session ticket key";
+    }
+
+    tls->ptls_ctx.encrypt_ticket = &tls->ticket_encryptor.super;
+    tls->ptls_ctx.ticket_lifetime = NET_QUIC_TICKET_LIFETIME;
+    tls->ptls_ctx.max_early_data_size = 0;
 
     if (ptls_load_certificates(&tls->ptls_ctx, cert_file) != 0) {
         return "unable to load Picotls server certificate";

@@ -76,14 +76,6 @@ v1 and v2.
 Net::QUIC does not yet expose the complete compatible-version-negotiation flow
 or its associated transport parameters.
 
-### Complete QUIC v2 client selection
-
-The server can accept the version present in a valid client Initial, and
-Version Negotiation advertises v1 and v2.
-
-The client currently starts with QUIC v1 and there is no public version
-selection or preferred-version policy.
-
 ### QUIC bit greasing
 
 Net::QUIC does not currently expose or deliberately configure QUIC-bit
@@ -108,10 +100,9 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. complete QUIC v2 / compatible version negotiation
-2. ECN
-3. QUIC DATAGRAM
-4. qlog and advanced congestion-control configuration
+1. ECN
+2. QUIC DATAGRAM
+3. qlog and advanced congestion-control configuration
 
 ## Already implemented
 

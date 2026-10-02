@@ -77,18 +77,26 @@ Recommended implementation order:
    - Server tickets are protected with a per-server-context AES-256-GCM key.
    - Invalid, expired, or stale tickets fall back to a full handshake.
    - Tickets are bound to accepted SNI and negotiated ALPN by Picotls.
-   - 0-RTT remains disabled and is deliberately separate.
+   - 0-RTT was deliberately kept separate and is completed in project 3.
    - Hardened code checkpoint CI: 15/15 PASS.
 
-3. Add 0-RTT / early data.
-   - Build directly on the session-resumption state from project 2.
-   - Permit application stream data before handshake completion only when the
-     saved TLS and QUIC state allows it.
-   - Handle rejection correctly and make the replay risk explicit to the
-     application API.
-   - Keep 0-RTT application policy above the event-loop-neutral Driver boundary.
+3. 0-RTT / early data. COMPLETE.
+   - Merged in PR #16.
+   - Main merge commit: 9f08f8911b79f34a5e4dd1142421012b54a5758e.
+   - Connection->early_data_state packages the matching TLS ticket and remembered
+     QUIC transport parameters into one opaque application cache value.
+   - Client opt-in is early_data => $state.
+   - Server opt-in is accept_early_data => 1.
+   - Connection->early_data_status reports none/pending/accepted/rejected.
+   - Stream->early_data preserves replay-sensitive origin on received streams.
+   - Rejected 0-RTT stream state is rolled back through ngtcp2 and stale Stream
+     objects are invalidated.
+   - Server ticket use is tracked conservatively so a ticket authorizes 0-RTT
+     at most once; later use can still resume TLS with early data rejected.
+   - Driver and event-loop adapter APIs did not change.
+   - Final CI matrix: 15/15 PASS.
 
-4. Add active migration and full path management.
+4. Add active migration and full path management. NEXT.
    - Represent and validate alternative network paths.
    - Support path probing, validation success/failure, path switching, and
      active connection migration.
@@ -124,8 +132,8 @@ The practical sequence is therefore:
 
     Stream abort semantics                         COMPLETE
         -> Session resumption                     COMPLETE
-        -> 0-RTT                                  NEXT
-        -> Migration/path management
+        -> 0-RTT                                  COMPLETE
+        -> Migration/path management              NEXT
         -> NEW_TOKEN + PMTU + ECN + complete version negotiation
 
 This order deliberately keeps the tightly coupled TLS work together, completes

@@ -37,6 +37,7 @@ net_quic_system_free(void *ptr)
 #endif
 
 #include <ngtcp2/ngtcp2_crypto_picotls.h>
+#include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 #include <openssl/x509_vfy.h>
@@ -96,7 +97,12 @@ struct net_quic_connection {
     size_t alpnlen;
     char *server_name;
     SV *server_tls_owner;
+    uint8_t *resume_ticket;
+    size_t resume_ticket_len;
+    uint8_t *session_ticket;
+    size_t session_ticket_len;
     int ready;
+    int resumed;
     int is_server;
     int local_bidi_stream_waiting;
     int local_uni_stream_waiting;
@@ -464,6 +470,8 @@ net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
     (void)conn;
 
     ep->ready = 1;
+    ep->resumed = ep->picotls_ctx.ptls != NULL
+        && ptls_is_psk_handshake(ep->picotls_ctx.ptls);
     return 0;
 }
 
@@ -613,6 +621,8 @@ net_quic_connection_free(pTHX_ net_quic_connection *ep)
 
     Safefree(ep->alpn);
     Safefree(ep->server_name);
+    Safefree(ep->resume_ticket);
+    Safefree(ep->session_ticket);
     Safefree(ep);
 }
 

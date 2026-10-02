@@ -115,8 +115,10 @@ struct net_quic_connection {
     size_t resume_ticket_len;
     uint8_t *session_ticket;
     size_t session_ticket_len;
+    uint32_t session_ticket_version;
     uint8_t *address_token;
     size_t address_token_len;
+    uint32_t address_token_version;
     int issue_new_token;
     int ready;
     int resumed;
@@ -492,6 +494,46 @@ net_quic_remove_connection_id_cb(
 }
 
 static int
+net_quic_new_token_secret(
+    uint8_t out[NET_QUIC_SERVER_SECRET_LEN],
+    const uint8_t base[NET_QUIC_SERVER_SECRET_LEN],
+    uint32_t version
+)
+{
+    static const uint8_t label[] = "Net::QUIC NEW_TOKEN v1";
+    uint8_t input[
+        NET_QUIC_SERVER_SECRET_LEN + sizeof(label) - 1 + 4
+    ];
+    unsigned int digest_len = 0;
+    size_t offset = 0;
+
+    memcpy(input + offset, base, NET_QUIC_SERVER_SECRET_LEN);
+    offset += NET_QUIC_SERVER_SECRET_LEN;
+    memcpy(input + offset, label, sizeof(label) - 1);
+    offset += sizeof(label) - 1;
+    input[offset++] = (uint8_t)(version >> 24);
+    input[offset++] = (uint8_t)(version >> 16);
+    input[offset++] = (uint8_t)(version >> 8);
+    input[offset++] = (uint8_t)version;
+
+    if (EVP_Digest(
+            input,
+            offset,
+            out,
+            &digest_len,
+            EVP_sha256(),
+            NULL
+        ) != 1 ||
+        digest_len != NET_QUIC_SERVER_SECRET_LEN) {
+        ptls_clear_memory(input, sizeof(input));
+        return -1;
+    }
+
+    ptls_clear_memory(input, sizeof(input));
+    return 0;
+}
+
+static int
 net_quic_submit_new_token(
     net_quic_connection *ep,
     ngtcp2_conn *conn,
@@ -499,6 +541,8 @@ net_quic_submit_new_token(
 )
 {
     uint8_t token[NGTCP2_CRYPTO_MAX_REGULAR_TOKENLEN];
+    uint8_t token_secret[NET_QUIC_SERVER_SECRET_LEN];
+    uint32_t version;
     ngtcp2_ssize tokenlen;
     ngtcp2_tstamp now;
     int rv;
@@ -508,15 +552,27 @@ net_quic_submit_new_token(
         return 0;
     }
 
+    version = ngtcp2_conn_get_negotiated_version2(conn);
+    if (version == 0 ||
+        net_quic_new_token_secret(
+            token_secret,
+            ep->server_secret,
+            version
+        ) != 0) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
     now = net_quic_system_now();
     tokenlen = ngtcp2_crypto_generate_regular_token(
         token,
-        ep->server_secret,
-        sizeof(ep->server_secret),
+        token_secret,
+        sizeof(token_secret),
         path->remote.addr,
         path->remote.addrlen,
         now
     );
+    ptls_clear_memory(token_secret, sizeof(token_secret));
+
     if (tokenlen < 0) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
@@ -564,6 +620,16 @@ net_quic_recv_new_token_cb(
 
     ep->address_token = copy;
     ep->address_token_len = tokenlen;
+    ep->address_token_version =
+        ngtcp2_conn_get_negotiated_version2(conn);
+
+    if (ep->address_token_version == 0) {
+        ptls_clear_memory(ep->address_token, ep->address_token_len);
+        Safefree(ep->address_token);
+        ep->address_token = NULL;
+        ep->address_token_len = 0;
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
 
     return 0;
 }

@@ -128,7 +128,7 @@ $driver->writable;
 
 That is the complete ordinary adapter contract.
 
-The fourth C<$ecn> receive argument is optional. Old adapters can omit it and
+The fourth `$ecn` receive argument is optional. Old adapters can omit it and
 continue to operate with ECN disabled at the socket boundary.
 
 An ECN-aware adapter reads the two ECN bits from the received IP header and

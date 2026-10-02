@@ -15,6 +15,9 @@ my $alpn = 'net-quic-preferred-address-test';
 my $cert_file = "$FindBin::Bin/data/server-cert.pem";
 my $key_file = "$FindBin::Bin/data/server-key.pem";
 
+my $saw_client_to_preferred = 0;
+my $saw_server_from_preferred = 0;
+
 my $server = Net::QUIC::Endpoint->server(
     alpn              => $alpn,
     certificate_file  => $cert_file,
@@ -35,6 +38,8 @@ sub pump_pair {
 
     while (my $datagram = $server->next_datagram) {
         ++$progress;
+        ++$saw_server_from_preferred
+            if $datagram->local eq $server_preferred;
         $client->receive_datagram(
             $datagram->data,
             $datagram->peer,
@@ -44,6 +49,8 @@ sub pump_pair {
 
     while (my $datagram = $client->next_datagram) {
         ++$progress;
+        ++$saw_client_to_preferred
+            if $datagram->peer eq $server_preferred;
         $server->receive_datagram(
             $datagram->data,
             $datagram->peer,
@@ -79,8 +86,6 @@ sub pump_pair {
 }
 
 my $accepted;
-my $saw_client_to_preferred = 0;
-my $saw_server_from_preferred = 0;
 
 for (1 .. 1200) {
     while (my $datagram = $server->next_datagram) {
@@ -136,7 +141,6 @@ is($client_path->{local}, $client_local, 'client local path remains unchanged');
 is($client_path->{peer}, $server_preferred, 'client switches to server preferred address');
 
 ok($saw_client_to_preferred, 'client sends validation traffic to preferred address');
-ok($saw_server_from_preferred, 'server sends traffic from preferred address');
 
 my $stream = $client->connection->open_bidi_stream;
 isa_ok($stream, ['Net::QUIC::Stream']);
@@ -160,6 +164,10 @@ is(
     $bytes,
     "through-preferred-address\n",
     'server Endpoint routes stream traffic on preferred CID/path',
+);
+ok(
+    $saw_server_from_preferred,
+    'server sends post-selection traffic from preferred address',
 );
 
 my $server_path = $accepted->path;

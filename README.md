@@ -128,7 +128,7 @@ $driver->writable;
 
 That is the complete ordinary adapter contract.
 
-The fourth C<$ecn> receive argument is optional. Old adapters can omit it and
+The fourth `$ecn` receive argument is optional. Old adapters can omit it and
 continue to operate with ECN disabled at the socket boundary.
 
 An ECN-aware adapter reads the two ECN bits from the received IP header and
@@ -162,7 +162,7 @@ should do. After `receive`, `timeout`, or `writable` returns, application
 code can inspect the Connection and Streams normally:
 
 ```perl
-$driver->receive($bytes, $local, $peer);
+$driver->receive($bytes, $local, $peer);  # or add $ecn as a fourth argument
 
 if ($connection->ready) {
     while (my $stream = $connection->next_stream) {
@@ -197,8 +197,10 @@ recover the actual destination address of every received packet and pass that
 packed address to:
 
 ```perl
-$driver->receive($bytes, $local, $peer);
+$driver->receive($bytes, $local, $peer, $ecn);
 ```
+
+The `$ecn` value is optional when the adapter cannot read ECN metadata.
 
 The adapter must also send each outbound Datagram using the local source address
 reported by:
@@ -901,12 +903,11 @@ Net::QUIC is the transport layer.
 
 HTTP/3 belongs in a separate distribution above it.
 
-The remaining later QUIC features include:
+The remaining later QUIC extensions and advanced tooling include:
 
 ```text
 QUIC DATAGRAM
 qlog
-ECN exposure
 advanced congestion-control tuning
 ```
 

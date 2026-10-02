@@ -8,7 +8,7 @@ use Hash::Util::FieldHash qw(fieldhash);
 use Net::QUIC ();
 use Net::QUIC::Stream ();
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 fieldhash my %OUTPUT_CALLBACK;
 fieldhash my %STREAM_AVAILABLE_CALLBACK;

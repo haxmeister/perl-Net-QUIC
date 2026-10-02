@@ -5,7 +5,7 @@ use warnings;
 
 use XSLoader ();
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -72,12 +72,17 @@ engine. Most applications do not need to drive Endpoint directly.
 
 Net::QUIC handles the QUIC-specific work, including:
 
-    QUIC packet processing
-    TLS 1.3
-    certificate verification
-    stream flow control
-    retransmission state
-    connection IDs
+    QUIC v1 and QUIC v2 packet processing
+    TLS 1.3 and certificate verification
+    bidirectional and unidirectional streams
+    flow control and stream limits
+    loss recovery and congestion control
+    Retry, NEW_TOKEN, and address validation
+    session resumption and optional 0-RTT
+    connection IDs and Stateless Reset
+    active migration and path validation
+    preferred addresses and PMTU discovery
+    ECN validation and packet marking metadata
     QUIC timers
     connection close and draining
 
@@ -127,13 +132,16 @@ Conceptually:
         -> $driver->start
 
     UDP packet received
-        -> $driver->receive($bytes, $local, $peer)
+        -> $driver->receive($bytes, $local, $peer, $ecn)
 
     requested QUIC timeout fired
         -> $driver->timeout
 
     UDP output recovered from backpressure
         -> $driver->writable
+
+The C<$ecn> argument is optional. Adapters that cannot read ECN metadata can
+continue to use the original three-argument form.
 
 Driver owns output draining, backpressure pause/resume state, and timeout
 replacement.
@@ -146,6 +154,9 @@ There is no ordinary application-visible QUIC pump loop.
 The packed C<local> address passed with a received UDP packet is part of the
 QUIC network path. It must be the concrete local destination address, not a
 wildcard bind address such as C<0.0.0.0> or C<::>.
+
+An ECN-aware adapter should also pass the two-bit ECN codepoint from the
+received IP header and apply C<$datagram-E<gt>ecn> to outgoing packets.
 
 A wildcard-bound UDP adapter must therefore recover the packet's actual local
 destination address with the operating system's packet-info mechanism and

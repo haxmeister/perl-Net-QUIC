@@ -606,8 +606,74 @@ lifetime. Connections accepted by that Endpoint share the key. Recreating the
 server Endpoint creates a new key, so tickets issued by the old Endpoint no
 longer resume and instead fall back to a full handshake.
 
-Session resumption does not enable 0-RTT. Application data still waits for the
-normal QUIC/TLS handshake readiness rules.
+Session resumption by itself does not enable 0-RTT. Application data still
+waits for the normal QUIC/TLS handshake readiness rules unless early data is
+explicitly requested.
+
+## 0-RTT / early data
+
+0-RTT is opt-in on both sides.
+
+After a completed client connection receives a session ticket, save one opaque
+early-data state value:
+
+```perl
+my $state = $connection->early_data_state;
+```
+
+A later client can deliberately attempt 0-RTT with:
+
+```perl
+my $driver = Net::QUIC::Driver->client(
+    ...
+    early_data => $state,
+);
+```
+
+The server must also explicitly allow it:
+
+```perl
+my $driver = Net::QUIC::Driver->server(
+    ...
+    accept_early_data => 1,
+);
+```
+
+The client may then open and send on local streams before
+`$connection->ready` becomes true.
+
+Check the outcome with:
+
+```perl
+$connection->early_data_status
+```
+
+which returns `none`, `pending`, `accepted`, or `rejected`.
+
+If 0-RTT is rejected, the normal handshake can continue. Net::QUIC rolls back
+the early stream state through ngtcp2. Stream objects created for the rejected
+attempt become invalid; after the handshake becomes ready, open new streams and
+resend only when the application operation is safe to retry.
+
+On the server:
+
+```perl
+if ($stream->early_data) {
+    ...
+}
+```
+
+identifies a stream that carried 0-RTT data. The flag remains available after
+the handshake completes.
+
+0-RTT data is replayable. Applications must restrict it to operations that are
+safe to repeat. Net::QUIC also makes each server session ticket single-use for
+0-RTT: replaying a ticket rejects its early data while still permitting
+ordinary TLS session resumption.
+
+The early-data state is opaque and contains the matching TLS ticket and
+remembered QUIC transport parameters. Cache it for the same server identity and
+ALPN; do not parse or modify it.
 
 ## Transport defaults
 
@@ -687,7 +753,6 @@ The first transport release does not need to include later QUIC features such
 as:
 
 ```text
-0-RTT / early data
 connection migration
 QUIC DATAGRAM
 qlog

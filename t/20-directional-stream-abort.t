@@ -195,10 +195,10 @@ for (1 .. 300) {
 
 is($stop_client->remote_stop_sending_code, 88,
     'peer observes the STOP_SENDING code');
-is($stop_client->local_reset_code, 88,
-    'peer responds to STOP_SENDING with RESET_STREAM');
+ok(!defined($stop_client->local_reset_code),
+    'peer STOP_SENDING does not masquerade as an explicit local reset');
 is($stop_server->remote_reset_code, 88,
-    'STOP_SENDING endpoint receives the matching RESET_STREAM');
+    'STOP_SENDING endpoint receives the matching RESET_STREAM when required');
 
 like(
     dies { $stop_client->send('more data') },

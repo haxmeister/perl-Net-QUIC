@@ -151,6 +151,10 @@ sub server {
     );
 
     my $transport = $class->_transport_config(delete $args{transport});
+    my $preferred_address = delete $args{preferred_address};
+
+    $class->_require_concrete_local($preferred_address)
+        if defined $preferred_address;
 
     return bless {
         mode                => 'server',
@@ -159,6 +163,7 @@ sub server {
         cid_length          => $class->_server_cid_length,
         server_secret       => $class->_server_secret,
         validate_address    => $args{validate_address} ? 1 : 0,
+        preferred_address   => $preferred_address,
         transport           => $transport,
         stateless_tx        => [],
         routes              => {},
@@ -263,6 +268,7 @@ sub _server_receive_datagram {
             $front->[1],
             $self->{server_secret},
             $self->{transport},
+            $self->{preferred_address},
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
@@ -608,6 +614,16 @@ handshake is complete:
 0-RTT data is replayable. Enabling this option means the application is
 responsible for restricting pre-handshake work to operations that are safe to
 repeat.
+
+C<preferred_address> optionally advertises another concrete packed IPv4 or IPv6
+server address:
+
+    preferred_address => $packed_preferred_server_address,
+
+The adapter must actually receive and send UDP traffic for that address.
+Net::QUIC advertises a fresh Connection ID and stateless-reset token with the
+preferred address. A compatible client validates the preferred path before
+switching to it.
 
 Finished Connections are retired automatically after QUIC's closing or
 draining period, and all of their CID routes are removed from the Endpoint at

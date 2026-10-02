@@ -712,6 +712,13 @@ net_quic_select_preferred_addr_cb(
 
     if (current->local.addr->sa_family == NGTCP2_AF_INET &&
         paddr->ipv4_present) {
+        ngtcp2_sockaddr_in remote = paddr->ipv4;
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__)
+        remote.sin_len = (uint8_t)sizeof(remote);
+#endif
+
         ngtcp2_addr_copy_byte(
             &dest->local,
             current->local.addr,
@@ -719,14 +726,21 @@ net_quic_select_preferred_addr_cb(
         );
         ngtcp2_addr_copy_byte(
             &dest->remote,
-            (const ngtcp2_sockaddr *)&paddr->ipv4,
-            (ngtcp2_socklen)sizeof(paddr->ipv4)
+            (const ngtcp2_sockaddr *)&remote,
+            (ngtcp2_socklen)sizeof(remote)
         );
         return 0;
     }
 
     if (current->local.addr->sa_family == NGTCP2_AF_INET6 &&
         paddr->ipv6_present) {
+        ngtcp2_sockaddr_in6 remote = paddr->ipv6;
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__)
+        remote.sin6_len = (uint8_t)sizeof(remote);
+#endif
+
         ngtcp2_addr_copy_byte(
             &dest->local,
             current->local.addr,
@@ -734,8 +748,8 @@ net_quic_select_preferred_addr_cb(
         );
         ngtcp2_addr_copy_byte(
             &dest->remote,
-            (const ngtcp2_sockaddr *)&paddr->ipv6,
-            (ngtcp2_socklen)sizeof(paddr->ipv6)
+            (const ngtcp2_sockaddr *)&remote,
+            (ngtcp2_socklen)sizeof(remote)
         );
         return 0;
     }

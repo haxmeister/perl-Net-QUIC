@@ -106,6 +106,11 @@ sub closed {
     return $self->{connection}->_stream_closed($self->{id});
 }
 
+sub early_data {
+    my ($self) = @_;
+    return $self->{connection}->_stream_early_data($self->{id});
+}
+
 sub remote_reset_code {
     my ($self) = @_;
     return $self->{connection}->_stream_remote_reset_code($self->{id});
@@ -383,6 +388,21 @@ been fully acknowledged.
 
 Returns the application error code passed to C<stop_sending> on this endpoint,
 or undef if this endpoint has not stopped its receive side.
+
+=head2 early_data
+
+    if ($stream->early_data) {
+        ...
+    }
+
+Returns true when the stream carried TLS 0-RTT data.
+
+This is especially useful on a server: the flag remains true after the
+handshake completes, so application code does not have to infer
+replay-sensitive origin from C<Connection-E<gt>ready> timing.
+
+0-RTT application data can be replayed. Treat an early-data stream only as
+operations that are safe to repeat.
 
 =head2 closed
 

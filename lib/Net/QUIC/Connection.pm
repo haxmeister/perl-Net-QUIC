@@ -13,6 +13,57 @@ our $VERSION = '0.01';
 fieldhash my %OUTPUT_CALLBACK;
 fieldhash my %STREAM_AVAILABLE_CALLBACK;
 
+my $EARLY_DATA_MAGIC = "NQED";
+my $EARLY_DATA_VERSION = 1;
+my $EARLY_DATA_HEADER_LEN = 13;
+
+sub _encode_early_data_state {
+    my ($class, $ticket, $transport) = @_;
+
+    die "missing TLS session ticket for early-data state"
+        if !defined($ticket) || $ticket eq '';
+    die "missing QUIC transport parameters for early-data state"
+        if !defined($transport) || $transport eq '';
+
+    return pack(
+        'a4CNN',
+        $EARLY_DATA_MAGIC,
+        $EARLY_DATA_VERSION,
+        length($ticket),
+        length($transport),
+    ) . $ticket . $transport;
+}
+
+sub _decode_early_data_state {
+    my ($class, $state) = @_;
+
+    die "early_data must be an opaque state returned by early_data_state"
+        if !defined($state)
+        || ref($state)
+        || length($state) < $EARLY_DATA_HEADER_LEN;
+
+    my ($magic, $version, $ticket_len, $transport_len) =
+        unpack('a4CNN', substr($state, 0, $EARLY_DATA_HEADER_LEN));
+
+    die "invalid Net::QUIC early-data state"
+        if $magic ne $EARLY_DATA_MAGIC
+        || $version != $EARLY_DATA_VERSION
+        || $ticket_len == 0
+        || $transport_len == 0
+        || $ticket_len > length($state) - $EARLY_DATA_HEADER_LEN
+        || $transport_len
+            != length($state) - $EARLY_DATA_HEADER_LEN - $ticket_len;
+
+    my $ticket = substr($state, $EARLY_DATA_HEADER_LEN, $ticket_len);
+    my $transport = substr(
+        $state,
+        $EARLY_DATA_HEADER_LEN + $ticket_len,
+        $transport_len,
+    );
+
+    return ($ticket, $transport);
+}
+
 sub _set_output_callback {
     my ($self, $callback) = @_;
 
@@ -104,6 +155,29 @@ sub close_info {
     return $self->_close_info;
 }
 
+sub early_data_state {
+    my ($self) = @_;
+
+    my $ticket = $self->session_ticket;
+    return if !defined $ticket;
+
+    my $transport = $self->_early_data_transport_params;
+    return if !defined $transport;
+
+    return __PACKAGE__->_encode_early_data_state($ticket, $transport);
+}
+
+sub early_data_status {
+    my ($self) = @_;
+    my @status = qw(none pending accepted rejected);
+    my $value = $self->_early_data_status;
+
+    die "invalid native early-data status"
+        if !defined($status[$value]);
+
+    return $status[$value];
+}
+
 sub closed {
     my ($self) = @_;
     return $self->_retired;
@@ -173,7 +247,55 @@ Returns true after the QUIC cryptographic handshake has completed.
 A server Connection may be returned before this becomes true.
 
 Application work that requires an established connection should wait for
-C<ready>.
+C<ready>, unless the client deliberately opened a replay-safe 0-RTT stream
+using saved early-data state.
+
+=head2 early_data_state
+
+    my $state = $connection->early_data_state;
+
+Returns an opaque byte string containing the TLS session ticket and the QUIC
+transport parameters needed for a later 0-RTT attempt.
+
+Returns undef until the client has completed a handshake and received a session
+ticket.
+
+Pass the returned value as C<early_data> on a later client Driver or Endpoint:
+
+    my $driver = Net::QUIC::Driver->client(
+        ...
+        early_data => $state,
+    );
+
+The state is opaque. Applications should store it without parsing or modifying
+it.
+
+=head2 early_data_status
+
+    my $status = $connection->early_data_status;
+
+Returns one of:
+
+    none
+    pending
+    accepted
+    rejected
+
+C<none> means this connection did not attempt 0-RTT.
+
+C<pending> means 0-RTT was requested and the peer has not yet accepted or
+rejected it.
+
+C<accepted> means the server accepted the early data.
+
+C<rejected> means the server rejected it or the saved state could not be used.
+ngtcp2 discards the early stream state in this case. Stream objects opened for
+that rejected attempt are no longer valid; the application should wait for the
+handshake to become ready, open new streams, and resend only if that is
+appropriate.
+
+0-RTT data can be replayed by the network. Only operations that are safe to
+repeat should be sent before the handshake is ready.
 
 =head2 resumed
 

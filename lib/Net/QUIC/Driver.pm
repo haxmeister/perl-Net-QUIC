@@ -352,7 +352,8 @@ certificate. It is used for certificate verification and does not have to be
 the same textual value used to obtain C<peer>.
 
 Endpoint options other than C<send> and C<set_timeout> are passed directly to
-L<Net::QUIC::Endpoint/client>.
+L<Net::QUIC::Endpoint/client>. This includes C<session_ticket> and
+C<early_data>; enabling either does not change the event-loop adapter contract.
 
 =head2 server
 
@@ -368,6 +369,9 @@ Creates a server L<Net::QUIC::Endpoint> and wraps it in a Driver.
 
 New server Connections obtained through C<next_connection> receive the same
 automatic application-output notification as the client Connection.
+
+Server Endpoint options such as C<accept_early_data> are passed through without
+changing the Driver or event-loop adapter API.
 
 =head2 new
 

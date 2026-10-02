@@ -27,6 +27,7 @@ struct net_quic_stream_state {
     int64_t id;
     int local_initiated;
     int bidirectional;
+    int early_data;
     int incoming_announced;
     int incoming_queued;
     size_t public_refs;
@@ -419,6 +420,10 @@ net_quic_stream_open_local(
         return NGTCP2_ERR_NOMEM;
     }
 
+    stream->early_data = !ep->ready
+        && ep->early_data_attempted
+        && !ep->early_data_rejected;
+
     if (bidirectional) {
         rv = ngtcp2_conn_open_bidi_stream(ep->conn, &stream_id, stream);
     } else {
@@ -791,6 +796,10 @@ net_quic_recv_stream_data_cb(
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
+    if ((flags & NGTCP2_STREAM_DATA_FLAG_0RTT) != 0) {
+        stream->early_data = 1;
+    }
+
     if (datalen == 0 && (flags & NGTCP2_STREAM_DATA_FLAG_FIN) == 0) {
         return 0;
     }
@@ -961,6 +970,37 @@ net_quic_recv_stop_sending_cb(
     stream->remote_stop_sending_code = app_error_code;
     stream->write_shutdown = 1;
     stream->tx_discard_pending = 1;
+
+    return 0;
+}
+
+
+static int
+net_quic_tls_early_data_rejected_cb(
+    ngtcp2_conn *conn,
+    void *user_data
+)
+{
+    dTHX;
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    net_quic_stream_state *stream;
+    net_quic_stream_state *next;
+
+    (void)conn;
+
+    ep->early_data_accepted = 0;
+    ep->early_data_rejected = 1;
+    ep->local_bidi_stream_waiting = 0;
+    ep->local_uni_stream_waiting = 0;
+    ep->stream_available_events = 0;
+
+    for (stream = ep->streams; stream != NULL; stream = next) {
+        next = stream->next;
+
+        if (stream->early_data) {
+            net_quic_stream_unlink_free(aTHX_ ep, stream);
+        }
+    }
 
     return 0;
 }

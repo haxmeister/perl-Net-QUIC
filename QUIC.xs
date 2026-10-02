@@ -315,10 +315,11 @@ _crypto_self_test()
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::_ServerTLS
 
 SV *
-_new(class, cert_file_sv, key_file_sv)
+_new(class, cert_file_sv, key_file_sv, accept_early_data = 0)
     const char *class
     SV *cert_file_sv
     SV *key_file_sv
+    int accept_early_data
     PREINIT:
         net_quic_server_tls *tls = NULL;
         const char *cert_file;
@@ -341,7 +342,12 @@ _new(class, cert_file_sv, key_file_sv)
             croak("unable to allocate shared server TLS context");
         }
 
-        tls_error = net_quic_server_tls_init(tls, cert_file, key_file);
+        tls_error = net_quic_server_tls_init(
+            tls,
+            cert_file,
+            key_file,
+            accept_early_data ? 1 : 0
+        );
         if (tls_error != NULL) {
             net_quic_server_tls_dispose(tls);
             Safefree(tls);
@@ -374,7 +380,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -383,6 +389,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
     SV *ca_file_sv
     SV *transport_sv
     SV *session_ticket_sv
+    SV *early_transport_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -391,12 +398,14 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         const char *server_name;
         const char *ca_file;
         const char *session_ticket = NULL;
+        const char *early_transport = NULL;
         STRLEN locallen;
         STRLEN peerlen;
         STRLEN alpnlen;
         STRLEN server_namelen;
         STRLEN ca_file_len;
         STRLEN session_ticket_len = 0;
+        STRLEN early_transport_len = 0;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
         ngtcp2_transport_params params;
@@ -415,6 +424,15 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
             session_ticket = SvPVbyte(session_ticket_sv, session_ticket_len);
             if (session_ticket_len == 0) {
                 croak("session_ticket cannot be empty");
+            }
+        }
+        if (SvOK(early_transport_sv)) {
+            early_transport = SvPVbyte(early_transport_sv, early_transport_len);
+            if (early_transport_len == 0) {
+                croak("early-data transport state cannot be empty");
+            }
+            if (session_ticket == NULL) {
+                croak("early-data transport state requires a session ticket");
             }
         }
 
@@ -505,6 +523,8 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         callbacks.delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb;
         callbacks.delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb;
         callbacks.version_negotiation = ngtcp2_crypto_version_negotiation_cb;
+        callbacks.tls_early_data_rejected =
+            net_quic_tls_early_data_rejected_cb;
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
 
@@ -543,6 +563,22 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         if (rv != 0) {
             net_quic_connection_free(aTHX_ ep);
             croak("ngtcp2_conn_client_new failed: %s", ngtcp2_strerror(rv));
+        }
+
+        if (early_transport != NULL) {
+            rv = ngtcp2_conn_decode_and_set_0rtt_transport_params(
+                ep->conn,
+                (const uint8_t *)early_transport,
+                (size_t)early_transport_len
+            );
+            if (rv != 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak(
+                    "invalid early-data transport state: %s",
+                    ngtcp2_strerror(rv)
+                );
+            }
+            ep->early_data_attempted = 1;
         }
 
         if (net_quic_tls_client_finish(aTHX_ ep) != 0) {
@@ -820,7 +856,8 @@ _open_stream(self, bidirectional)
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (!ep->ready) {
+        if (!ep->ready &&
+            (!ep->early_data_attempted || ep->early_data_rejected)) {
             croak("cannot open a QUIC stream before the handshake is ready");
         }
 
@@ -857,7 +894,8 @@ _open_bidi_stream(self)
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (!ep->ready) {
+        if (!ep->ready &&
+            (!ep->early_data_attempted || ep->early_data_rejected)) {
             croak("cannot open a QUIC stream before the handshake is ready");
         }
 
@@ -1117,6 +1155,23 @@ _stream_closed(self, stream_id_iv)
             croak("unknown QUIC stream");
         }
         RETVAL = stream->closed ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+int
+_stream_early_data(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+        RETVAL = stream->early_data ? 1 : 0;
     OUTPUT:
         RETVAL
 
@@ -2008,6 +2063,93 @@ session_ticket(self)
                 (const char *)ep->session_ticket,
                 (STRLEN)ep->session_ticket_len
             );
+        }
+    OUTPUT:
+        RETVAL
+
+
+SV *
+_early_data_transport_params(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        uint8_t *buf = NULL;
+        size_t buflen = 256;
+        ngtcp2_ssize nwrite;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->ready ||
+            ep->session_ticket == NULL ||
+            ep->session_ticket_len == 0) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            for (;;) {
+                Newx(buf, buflen, uint8_t);
+                if (buf == NULL) {
+                    croak("unable to allocate early-data transport state");
+                }
+
+                nwrite = ngtcp2_conn_encode_0rtt_transport_params2(
+                    ep->conn,
+                    buf,
+                    buflen
+                );
+
+                if (nwrite != NGTCP2_ERR_NOBUF) {
+                    break;
+                }
+
+                Safefree(buf);
+                buf = NULL;
+
+                if (buflen >= 16384) {
+                    croak("early-data transport state is unexpectedly large");
+                }
+                buflen *= 2;
+            }
+
+            if (nwrite < 0) {
+                Safefree(buf);
+                croak(
+                    "unable to encode early-data transport state: %s",
+                    ngtcp2_strerror((int)nwrite)
+                );
+            }
+
+            RETVAL = newSVpvn((const char *)buf, (STRLEN)nwrite);
+            Safefree(buf);
+        }
+    OUTPUT:
+        RETVAL
+
+int
+_early_data_status(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        ptls_early_data_acceptance_t acceptance;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->early_data_attempted) {
+            RETVAL = 0;
+        } else if (ep->early_data_rejected) {
+            RETVAL = 3;
+        } else if (ep->early_data_accepted) {
+            RETVAL = 2;
+        } else if (ep->picotls_ctx.ptls != NULL) {
+            acceptance =
+                ep->picotls_ctx.handshake_properties.client.early_data_acceptance;
+            if (acceptance == PTLS_EARLY_DATA_ACCEPTED) {
+                RETVAL = 2;
+            } else if (acceptance == PTLS_EARLY_DATA_REJECTED) {
+                RETVAL = 3;
+            } else {
+                RETVAL = 1;
+            }
+        } else {
+            RETVAL = 1;
         }
     OUTPUT:
         RETVAL

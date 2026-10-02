@@ -18,8 +18,9 @@ Unreleased
     - Require explicit client early_data and server accept_early_data opt-in.
     - Roll rejected 0-RTT streams back through ngtcp2 and invalidate stale
       Stream objects without disturbing the continuing TLS handshake.
-    - Add single-use 0-RTT ticket replay protection; replayed tickets can still
-      resume TLS but early application data is rejected.
+    - Add conservative single-use 0-RTT ticket replay protection; the first
+      successful ticket use consumes its 0-RTT allowance, while later uses can
+      still resume TLS with early application data rejected.
 
 0.01  2026-09-29
     - First stable CPAN release.

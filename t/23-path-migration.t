@@ -4,13 +4,14 @@ use warnings;
 use FindBin ();
 use Socket qw(inet_aton pack_sockaddr_in);
 use Test2::V0;
-use Time::HiRes qw(sleep);
+use Time::HiRes qw(sleep time);
 
 use Net::QUIC::Connection;
 use Net::QUIC::Endpoint;
 
 my $client_a = pack_sockaddr_in(40100, inet_aton('127.0.0.1'));
 my $client_b = pack_sockaddr_in(40101, inet_aton('127.0.0.1'));
+my $client_c = pack_sockaddr_in(40102, inet_aton('127.0.0.1'));
 my $server_local = pack_sockaddr_in(4460, inet_aton('127.0.0.1'));
 my $alpn = 'net-quic-migration-test';
 my $cert_file = "$FindBin::Bin/data/server-cert.pem";
@@ -252,6 +253,72 @@ like(
     qr/different local network path|another path transition/i,
     'migrating to the current local path is rejected',
 );
+
+$client->connection->migrate($client_c);
+is(
+    $client->connection->path_validation_status,
+    'validating',
+    'unreachable path C starts validating',
+);
+
+my $failure_deadline = time() + 8;
+my $dropped_c_packets = 0;
+
+while (
+    $client->connection->path_validation_status eq 'validating'
+    && time() < $failure_deadline
+) {
+    my $progress = 0;
+
+    while (my $datagram = $client->next_datagram) {
+        ++$progress;
+
+        if ($datagram->local eq $client_c) {
+            ++$dropped_c_packets;
+            next;
+        }
+
+        $server->_receive_datagram(
+            $datagram->data,
+            $datagram->peer,
+            $datagram->local,
+        );
+    }
+
+    $progress += deliver_server_to_client($server, $client);
+
+    my $client_after = $client->timeout_after;
+    if (defined($client_after) && $client_after <= 0) {
+        ++$progress;
+        $client->handle_timeout;
+    }
+
+    my $server_after = $server->_timeout_after;
+    if (defined($server_after) && $server_after <= 0) {
+        ++$progress;
+        $server->_handle_timeout;
+    }
+
+    if (!$progress) {
+        my @wait = sort { $a <=> $b }
+            grep { defined($_) && $_ > 0 }
+            ($client_after, $server_after);
+
+        sleep($wait[0] > 0.01 ? 0.01 : $wait[0] + 0.001)
+            if @wait;
+    }
+}
+
+ok($dropped_c_packets, 'test drops validation traffic for path C');
+is(
+    $client->connection->path_validation_status,
+    'failed',
+    'unreachable path validation reports failure',
+);
+
+my $fallback_path = $client->connection->path;
+is($fallback_path->{local}, $client_b, 'failed validation keeps path B active');
+is($fallback_path->{peer}, $server_local, 'failed validation keeps server peer');
 
 like(
     dies { $server->migrate($server_local) },

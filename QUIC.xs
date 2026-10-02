@@ -610,7 +610,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef, validated_token_type = 0, issue_new_token = 0)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -621,6 +621,8 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *server_secret_sv
     SV *transport_sv
     SV *preferred_address_sv
+    int validated_token_type
+    int issue_new_token
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -720,6 +722,14 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
             croak("unable to allocate Net::QUIC::Connection");
         }
         ep->is_server = 1;
+        ep->issue_new_token = issue_new_token ? 1 : 0;
+
+        if (validated_token_type != NGTCP2_TOKEN_TYPE_UNKNOWN &&
+            validated_token_type != NGTCP2_TOKEN_TYPE_RETRY &&
+            validated_token_type != NGTCP2_TOKEN_TYPE_NEW_TOKEN) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("invalid validated token type");
+        }
 
         if (server_secret_data != NULL) {
             memcpy(
@@ -815,14 +825,21 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
 
-        if (odcid_data != NULL) {
+        if (validated_token_type != NGTCP2_TOKEN_TYPE_UNKNOWN) {
             if (hd.tokenlen == 0) {
                 net_quic_connection_free(aTHX_ ep);
-                croak("Retry-validated connection is missing its token");
+                croak("validated connection is missing its token");
             }
+
+            if (odcid_data != NULL &&
+                validated_token_type != NGTCP2_TOKEN_TYPE_RETRY) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("original destination CID requires a Retry token");
+            }
+
             settings.token = hd.token;
             settings.tokenlen = hd.tokenlen;
-            settings.token_type = NGTCP2_TOKEN_TYPE_RETRY;
+            settings.token_type = (ngtcp2_token_type)validated_token_type;
         }
 
         ngtcp2_transport_params_default(&params);

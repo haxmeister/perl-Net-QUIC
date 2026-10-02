@@ -68,6 +68,14 @@ net_quic_tls_ticket_encrypt(
     int aad_len = 0;
     int ret = PTLS_ERROR_LIBRARY;
 
+    if (src.len > INT_MAX ||
+        src.len > SIZE_MAX
+            - NET_QUIC_TICKET_KEY_NAME_LEN
+            - NET_QUIC_TICKET_NONCE_LEN
+            - NET_QUIC_TICKET_TAG_LEN) {
+        return PTLS_ERROR_LIBRARY;
+    }
+
     if (net_quic_random_bytes(nonce, sizeof(nonce)) != 0) {
         return PTLS_ERROR_LIBRARY;
     }
@@ -183,6 +191,10 @@ net_quic_tls_ticket_decrypt(
         - NET_QUIC_TICKET_NONCE_LEN
         - NET_QUIC_TICKET_TAG_LEN;
     tag = ciphertext + ciphertext_len;
+
+    if (ciphertext_len > INT_MAX) {
+        return PTLS_ALERT_HANDSHAKE_FAILURE;
+    }
 
     if (ptls_buffer_reserve(dst, ciphertext_len) != 0) {
         return PTLS_ERROR_NO_MEMORY;

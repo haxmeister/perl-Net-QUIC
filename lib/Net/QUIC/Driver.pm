@@ -243,7 +243,7 @@ Driver is the recommended integration API.
 
 Net::QUIC needs two things from an event loop:
 
-    a UDP socket
+    UDP I/O
     one replaceable one-shot timer
 
 Driver turns those two things into a working QUIC transport.

@@ -1158,6 +1158,23 @@ _stream_closed(self, stream_id_iv)
     OUTPUT:
         RETVAL
 
+int
+_stream_early_data(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+        RETVAL = stream->early_data ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
 SV *
 _stream_remote_reset_code(self, stream_id_iv)
     SV *self

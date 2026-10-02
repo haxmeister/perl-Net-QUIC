@@ -116,20 +116,12 @@ sub client {
         : '';
 
     my $transport = $class->_transport_config(delete $args{transport});
-    my $version = $class->_quic_version(
-        delete $args{version},
-        'version',
-        1,
-    );
+    my $version_arg = delete $args{version};
     my $session_ticket = delete $args{session_ticket};
     my $early_data = delete $args{early_data};
     my $address_token = delete $args{address_token};
     my $early_transport;
-
-    croak "session_ticket cannot be empty"
-        if defined($session_ticket) && $session_ticket eq '';
-    croak "address_token cannot be empty"
-        if defined($address_token) && $address_token eq '';
+    my $saved_version;
 
     if (defined $early_data) {
         croak "session_ticket and early_data cannot be used together"
@@ -138,6 +130,36 @@ sub client {
         ($session_ticket, $early_transport) =
             Net::QUIC::Connection->_decode_early_data_state($early_data);
     }
+
+    if (defined $session_ticket) {
+        my $ticket_version;
+        ($session_ticket, $ticket_version) =
+            Net::QUIC::Connection->_decode_session_ticket($session_ticket);
+        $saved_version = $ticket_version;
+    }
+
+    if (defined $address_token) {
+        my $token_version;
+        ($address_token, $token_version) =
+            Net::QUIC::Connection->_decode_address_token($address_token);
+
+        croak "saved session and address token QUIC versions do not match"
+            if defined($saved_version)
+            && $saved_version != $token_version;
+
+        $saved_version = $token_version;
+    }
+
+    my $version = $class->_quic_version(
+        $version_arg,
+        'version',
+        defined($saved_version) ? $saved_version : 1,
+    );
+
+    croak "saved QUIC state belongs to version $saved_version, not version $version"
+        if defined($saved_version) && $version != $saved_version;
+
+    my $version_locked = defined($saved_version) ? 1 : 0;
 
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
@@ -150,6 +172,7 @@ sub client {
         $early_transport,
         $address_token,
         $version,
+        $version_locked,
     );
 
     return bless {

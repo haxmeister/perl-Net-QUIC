@@ -621,8 +621,16 @@ net_quic_connection_free(pTHX_ net_quic_connection *ep)
 
     Safefree(ep->alpn);
     Safefree(ep->server_name);
-    Safefree(ep->resume_ticket);
-    Safefree(ep->session_ticket);
+
+    if (ep->resume_ticket != NULL) {
+        ptls_clear_memory(ep->resume_ticket, ep->resume_ticket_len);
+        Safefree(ep->resume_ticket);
+    }
+    if (ep->session_ticket != NULL) {
+        ptls_clear_memory(ep->session_ticket, ep->session_ticket_len);
+        Safefree(ep->session_ticket);
+    }
+
     Safefree(ep);
 }
 

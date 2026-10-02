@@ -114,6 +114,9 @@ struct net_quic_connection {
     size_t resume_ticket_len;
     uint8_t *session_ticket;
     size_t session_ticket_len;
+    uint8_t *address_token;
+    size_t address_token_len;
+    int issue_new_token;
     int ready;
     int resumed;
     int early_data_attempted;
@@ -488,10 +491,86 @@ net_quic_remove_connection_id_cb(
 }
 
 static int
+net_quic_submit_new_token(
+    net_quic_connection *ep,
+    ngtcp2_conn *conn,
+    const ngtcp2_path *path
+)
+{
+    uint8_t token[NGTCP2_CRYPTO_MAX_REGULAR_TOKENLEN];
+    ngtcp2_ssize tokenlen;
+    ngtcp2_tstamp now;
+    int rv;
+
+    if (!ep->is_server || !ep->issue_new_token || path == NULL ||
+        path->remote.addr == NULL || path->remote.addrlen == 0) {
+        return 0;
+    }
+
+    now = net_quic_system_now();
+    tokenlen = ngtcp2_crypto_generate_regular_token(
+        token,
+        ep->server_secret,
+        sizeof(ep->server_secret),
+        path->remote.addr,
+        path->remote.addrlen,
+        now
+    );
+    if (tokenlen < 0) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    rv = ngtcp2_conn_submit_new_token(
+        conn,
+        token,
+        (size_t)tokenlen
+    );
+
+    ptls_clear_memory(token, sizeof(token));
+
+    return rv == 0 ? 0 : NGTCP2_ERR_CALLBACK_FAILURE;
+}
+
+static int
+net_quic_recv_new_token_cb(
+    ngtcp2_conn *conn,
+    const uint8_t *token,
+    size_t tokenlen,
+    void *user_data
+)
+{
+    dTHX;
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    uint8_t *copy;
+
+    (void)conn;
+
+    if (token == NULL || tokenlen == 0) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    Newx(copy, tokenlen, uint8_t);
+    if (copy == NULL) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    memcpy(copy, token, tokenlen);
+
+    if (ep->address_token != NULL) {
+        ptls_clear_memory(ep->address_token, ep->address_token_len);
+        Safefree(ep->address_token);
+    }
+
+    ep->address_token = copy;
+    ep->address_token_len = tokenlen;
+
+    return 0;
+}
+
+static int
 net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
 {
     net_quic_connection *ep = (net_quic_connection *)user_data;
-    (void)conn;
 
     ep->ready = 1;
     ep->resumed = ep->picotls_ctx.ptls != NULL
@@ -507,6 +586,14 @@ net_quic_handshake_completed_cb(ngtcp2_conn *conn, void *user_data)
         } else if (acceptance == PTLS_EARLY_DATA_REJECTED) {
             ep->early_data_accepted = 0;
             ep->early_data_rejected = 1;
+        }
+    }
+
+    if (ep->is_server && ep->issue_new_token) {
+        const ngtcp2_path *path = ngtcp2_conn_get_path2(conn);
+
+        if (net_quic_submit_new_token(ep, conn, path) != 0) {
+            return NGTCP2_ERR_CALLBACK_FAILURE;
         }
     }
 
@@ -679,14 +766,23 @@ net_quic_path_validation_cb(
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
-    return net_quic_record_path_validation(
-        ep,
-        status,
-        flags,
-        path
-    ) == 0
-        ? 0
-        : NGTCP2_ERR_CALLBACK_FAILURE;
+    if (net_quic_record_path_validation(
+            ep,
+            status,
+            flags,
+            path
+        ) != 0) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    if (result == NGTCP2_PATH_VALIDATION_RESULT_SUCCESS &&
+        (flags & NGTCP2_PATH_VALIDATION_FLAG_NEW_TOKEN) != 0 &&
+        ep->is_server &&
+        ep->issue_new_token) {
+        return net_quic_submit_new_token(ep, conn, path);
+    }
+
+    return 0;
 }
 
 
@@ -837,6 +933,10 @@ net_quic_connection_free(pTHX_ net_quic_connection *ep)
     if (ep->session_ticket != NULL) {
         ptls_clear_memory(ep->session_ticket, ep->session_ticket_len);
         Safefree(ep->session_ticket);
+    }
+    if (ep->address_token != NULL) {
+        ptls_clear_memory(ep->address_token, ep->address_token_len);
+        Safefree(ep->address_token);
     }
 
     Safefree(ep);

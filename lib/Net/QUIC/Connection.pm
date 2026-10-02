@@ -175,6 +175,36 @@ A server Connection may be returned before this becomes true.
 Application work that requires an established connection should wait for
 C<ready>.
 
+=head2 resumed
+
+    if ($connection->resumed) {
+        ...
+    }
+
+Returns true when the completed TLS 1.3 handshake resumed a previous session
+using a saved session ticket.
+
+A normal first connection returns false.
+
+An unusable or expired ticket does not make the connection fail. TLS can fall
+back to a full certificate handshake, in which case C<resumed> is false.
+
+=head2 session_ticket
+
+    my $ticket = $connection->session_ticket;
+
+Returns the newest opaque TLS session ticket received by a client Connection,
+or undef when no ticket has been received yet.
+
+The application may store this byte string and pass it as C<session_ticket> on
+a later client Endpoint or Driver connection to the same server identity and
+ALPN.
+
+The ticket is opaque. Applications should not parse or modify it.
+
+Net::QUIC does not enable 0-RTT merely because a session ticket is supplied.
+This method currently provides handshake resumption only.
+
 =head1 OPENING STREAMS
 
 =head2 open_bidi_stream

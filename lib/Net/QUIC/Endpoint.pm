@@ -106,10 +106,13 @@ sub client {
     my $transport = $class->_transport_config(delete $args{transport});
     my $session_ticket = delete $args{session_ticket};
     my $early_data = delete $args{early_data};
+    my $address_token = delete $args{address_token};
     my $early_transport;
 
     croak "session_ticket cannot be empty"
         if defined($session_ticket) && $session_ticket eq '';
+    croak "address_token cannot be empty"
+        if defined($address_token) && $address_token eq '';
 
     if (defined $early_data) {
         croak "session_ticket and early_data cannot be used together"
@@ -128,6 +131,7 @@ sub client {
         $transport,
         $session_ticket,
         $early_transport,
+        $address_token,
     );
 
     return bless {
@@ -269,6 +273,8 @@ sub _server_receive_datagram {
             $self->{server_secret},
             $self->{transport},
             $self->{preferred_address},
+            $front->[2] // 0,
+            $self->{validate_address},
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
@@ -523,6 +529,15 @@ by server identity and ALPN.
 Supplying C<session_ticket> enables TLS handshake resumption only. It does not
 enable 0-RTT application data.
 
+A client can also reuse an address-validation token received through
+L<Net::QUIC::Connection/address_token>:
+
+    address_token => $saved_address_token,
+
+The address token is opaque and is independent of TLS session resumption. When
+the server accepts the token, a later connection can prove its source address
+without paying another Retry round trip.
+
 To deliberately attempt 0-RTT, pass the opaque state returned by
 L<Net::QUIC::Connection/early_data_state>:
 
@@ -598,12 +613,19 @@ layer. One server endpoint can route packets for multiple QUIC connections.
 Unsupported QUIC versions are answered statelessly with Version Negotiation
 before a Connection object is created.
 
-C<validate_address> is optional and defaults to false. When true, the first
-acceptable Initial from a new peer receives Retry instead of creating a
+C<validate_address> is optional and defaults to false. When true, a new peer
+without a valid address token receives Retry instead of immediately creating a
 Connection. The Retry token is authenticated, bound to the peer socket address,
-and valid for 10 seconds. Net::QUIC creates the Connection only after the peer
-returns a valid token. A token replayed from a different peer address is
-rejected without creating connection state.
+and valid for 10 seconds.
+
+After a validated connection completes its handshake, Net::QUIC automatically
+sends NEW_TOKEN. A client can save that opaque token and offer it on a later
+connection with C<address_token>. A valid NEW_TOKEN proves the client address
+without another Retry round trip. NEW_TOKEN values are currently valid for 24
+hours and are bound to the client IP address rather than its source port.
+
+An invalid NEW_TOKEN is treated as an unvalidated address and can receive Retry.
+An invalid Retry token remains an INVALID_TOKEN error.
 
 C<accept_early_data> is optional and defaults to false. Set it true only when
 the application is prepared to receive TLS 0-RTT stream data before the

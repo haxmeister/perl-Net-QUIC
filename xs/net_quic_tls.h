@@ -154,6 +154,7 @@ net_quic_tls_ticket_encrypt(
         EVP_EncryptFinal_ex(
             ctx,
             out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_VERSION_LEN
                 + NET_QUIC_TICKET_NONCE_LEN
                 + outlen,
             &final_len
@@ -163,6 +164,7 @@ net_quic_tls_ticket_encrypt(
             EVP_CTRL_GCM_GET_TAG,
             NET_QUIC_TICKET_TAG_LEN,
             out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_VERSION_LEN
                 + NET_QUIC_TICKET_NONCE_LEN
                 + outlen
                 + final_len

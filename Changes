@@ -11,7 +11,15 @@ Unreleased
     - Protect server session tickets with a per-server AES-256-GCM key.
     - Fall back to a full handshake when a saved ticket is expired, invalid,
       or belongs to a different server ticket key.
-    - Keep 0-RTT disabled; early data remains a separate future feature.
+    - Add explicit QUIC 0-RTT / early-data support on top of session resumption.
+    - Add Connection->early_data_state as one opaque ticket-plus-transport blob.
+    - Add Connection->early_data_status with none/pending/accepted/rejected state.
+    - Add Stream->early_data so servers can retain replay-sensitive origin.
+    - Require explicit client early_data and server accept_early_data opt-in.
+    - Roll rejected 0-RTT streams back through ngtcp2 and invalidate stale
+      Stream objects without disturbing the continuing TLS handshake.
+    - Add single-use 0-RTT ticket replay protection; replayed tickets can still
+      resume TLS but early application data is rejected.
 
 0.01  2026-09-29
     - First stable CPAN release.

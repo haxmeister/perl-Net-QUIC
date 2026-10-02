@@ -33,11 +33,16 @@ struct net_quic_stream_state {
     int remote_finished;
     int local_finished;
     int write_shutdown;
+    int read_shutdown;
     int closed;
     int remote_reset;
     uint64_t remote_reset_code;
     int local_reset;
     uint64_t local_reset_code;
+    int remote_stop_sending;
+    uint64_t remote_stop_sending_code;
+    int local_stop_sending;
+    uint64_t local_stop_sending_code;
     uint64_t rx_next_offset;
     uint64_t tx_next_offset;
     uint64_t tx_acked_through;
@@ -236,6 +241,30 @@ net_quic_stream_free_rx(pTHX_ net_quic_stream_state *stream)
 
     stream->rx_head = NULL;
     stream->rx_tail = NULL;
+}
+
+static void
+net_quic_stream_discard_rx(
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    net_quic_stream_rx_chunk *chunk;
+    net_quic_stream_rx_chunk *next;
+    uint64_t discarded = 0;
+
+    for (chunk = stream->rx_head; chunk != NULL; chunk = next) {
+        next = chunk->next;
+        discarded += (uint64_t)chunk->len;
+        net_quic_stream_rx_chunk_free(aTHX_ chunk);
+    }
+
+    stream->rx_head = NULL;
+    stream->rx_tail = NULL;
+
+    if (discarded != 0) {
+        ngtcp2_conn_extend_max_offset(ep->conn, discarded);
+    }
 }
 
 static void
@@ -738,6 +767,7 @@ net_quic_recv_stream_data_cb(
     }
 
     if (!net_quic_stream_can_receive(stream) ||
+        stream->read_shutdown ||
         offset != stream->rx_next_offset ||
         datalen > UINT64_MAX - stream->rx_next_offset) {
         return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -848,6 +878,7 @@ net_quic_stream_close_cb(
     if (stream != NULL) {
         stream->closed = 1;
         stream->write_shutdown = 1;
+        stream->read_shutdown = 1;
         net_quic_stream_free_tx(aTHX_ stream);
     }
 
@@ -880,6 +911,41 @@ net_quic_stream_reset_cb(
 
     stream->remote_reset = 1;
     stream->remote_reset_code = app_error_code;
+    stream->read_shutdown = 1;
+    return 0;
+}
+
+static int
+net_quic_recv_stop_sending_cb(
+    ngtcp2_conn *conn,
+    int64_t stream_id,
+    uint64_t app_error_code,
+    void *user_data,
+    void *stream_user_data
+)
+{
+    dTHX;
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    net_quic_stream_state *stream =
+        (net_quic_stream_state *)stream_user_data;
+
+    if (stream == NULL) {
+        stream = net_quic_stream_find(ep, stream_id);
+    }
+    if (stream == NULL && !net_quic_stream_id_is_local(ep, stream_id)) {
+        stream = net_quic_stream_ensure_remote(aTHX_ conn, ep, stream_id);
+    }
+    if (stream == NULL) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    stream->remote_stop_sending = 1;
+    stream->remote_stop_sending_code = app_error_code;
+    stream->local_reset = 1;
+    stream->local_reset_code = app_error_code;
+    stream->write_shutdown = 1;
+    net_quic_stream_free_tx(aTHX_ stream);
+
     return 0;
 }
 

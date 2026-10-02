@@ -38,8 +38,8 @@ timers, connection IDs, migration, and the other transport details.
 
 Your event loop still owns the UDP socket.
 
-You do not need to know ngtcp2 to use Net::QUIC. Net::QUIC uses ngtcp2
-internally as its native QUIC engine.
+You do not need to know ngtcp2 to use Net::QUIC. It is an internal native
+dependency.
 
 Net::QUIC is not HTTP/3 and is not a web framework. It provides connections
 and byte streams. Your application decides what the bytes mean.
@@ -130,7 +130,7 @@ Driver is the recommended event-loop integration layer.
 
 The event loop owns:
 
-    one UDP socket
+    UDP I/O
     one replaceable one-shot timer
 
 The adapter supplies two callbacks:

@@ -102,6 +102,7 @@ Its useful values are:
 $datagram->data;     # complete UDP payload bytes
 $datagram->peer;     # packed destination socket address
 $datagram->local;    # packed local socket address chosen by QUIC
+$datagram->ecn;      # two-bit ECN codepoint for the IP header
 ```
 
 The adapter sends `data` as one UDP datagram to `peer`. `local` describes
@@ -117,6 +118,7 @@ $driver->receive(
     $bytes,
     $packed_local_address,
     $packed_peer_address,
+    $ecn,
 );
 
 $driver->timeout;
@@ -125,6 +127,26 @@ $driver->writable;
 ```
 
 That is the complete ordinary adapter contract.
+
+The fourth C<$ecn> receive argument is optional. Old adapters can omit it and
+continue to operate with ECN disabled at the socket boundary.
+
+An ECN-aware adapter reads the two ECN bits from the received IP header and
+passes the wire value through unchanged:
+
+```text
+0   Not-ECT
+1   ECT(1)
+2   ECT(0)
+3   CE
+```
+
+For output, it places `$datagram->ecn` into the IP-header ECN field before
+sending the UDP datagram.
+
+ngtcp2 owns ECN testing, validation, congestion response, and disabling ECN
+when a path does not preserve or report markings correctly. Net::QUIC only
+carries the packet metadata between ngtcp2 and the UDP adapter.
 
 There is no application-visible QUIC pump loop.
 

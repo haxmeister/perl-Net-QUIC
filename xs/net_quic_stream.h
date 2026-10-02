@@ -43,6 +43,7 @@ struct net_quic_stream_state {
     uint64_t remote_stop_sending_code;
     int local_stop_sending;
     uint64_t local_stop_sending_code;
+    int tx_discard_pending;
     uint64_t rx_next_offset;
     uint64_t tx_next_offset;
     uint64_t tx_acked_through;
@@ -264,6 +265,23 @@ net_quic_stream_discard_rx(
 
     if (discarded != 0) {
         ngtcp2_conn_extend_max_offset(ep->conn, discarded);
+    }
+}
+
+static void
+net_quic_stream_apply_deferred_discards(
+    pTHX_ net_quic_connection *ep
+)
+{
+    net_quic_stream_state *stream;
+
+    for (stream = ep->streams; stream != NULL; stream = stream->next) {
+        if (!stream->tx_discard_pending) {
+            continue;
+        }
+
+        stream->tx_discard_pending = 0;
+        net_quic_stream_free_tx(aTHX_ stream);
     }
 }
 
@@ -944,7 +962,7 @@ net_quic_recv_stop_sending_cb(
     stream->local_reset = 1;
     stream->local_reset_code = app_error_code;
     stream->write_shutdown = 1;
-    net_quic_stream_free_tx(aTHX_ stream);
+    stream->tx_discard_pending = 1;
 
     return 0;
 }

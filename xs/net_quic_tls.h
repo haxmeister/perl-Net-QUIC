@@ -341,7 +341,7 @@ net_quic_tls_ticket_replay_rebuild(
         new_capacity *= 2;
     }
 
-    new_table = calloc(new_capacity, sizeof(*new_table));
+    new_table = net_quic_system_calloc(new_capacity, sizeof(*new_table));
     if (new_table == NULL) {
         return -1;
     }
@@ -358,7 +358,7 @@ net_quic_tls_ticket_replay_rebuild(
         }
     }
 
-    free(self->used_tickets);
+    net_quic_system_free(self->used_tickets);
     self->used_tickets = new_table;
     self->used_tickets_capacity = new_capacity;
     self->used_tickets_count = live_count;
@@ -392,7 +392,7 @@ net_quic_tls_ticket_replay_check(
 
     if (self->used_tickets_capacity == 0) {
         self->used_tickets_capacity = 1024;
-        self->used_tickets = calloc(
+        self->used_tickets = net_quic_system_calloc(
             self->used_tickets_capacity,
             sizeof(*self->used_tickets)
         );
@@ -762,7 +762,7 @@ net_quic_server_tls_dispose(net_quic_server_tls *tls)
         sizeof(tls->ticket_encryptor.key_name)
     );
 
-    free(tls->ticket_encryptor.used_tickets);
+    net_quic_system_free(tls->ticket_encryptor.used_tickets);
     tls->ticket_encryptor.used_tickets = NULL;
     tls->ticket_encryptor.used_tickets_capacity = 0;
     tls->ticket_encryptor.used_tickets_count = 0;

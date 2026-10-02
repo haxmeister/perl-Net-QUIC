@@ -2818,6 +2818,10 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                                 (STRLEN)odcid.datalen
                             )
                         );
+                        av_push(
+                            av,
+                            newSViv(NGTCP2_TOKEN_TYPE_RETRY)
+                        );
                         RETVAL = newRV_noinc((SV *)av);
                     } else {
                         nwrite = ngtcp2_crypto_write_connection_close(
@@ -2843,6 +2847,93 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                                 )
                             );
                         }
+                        RETVAL = newRV_noinc((SV *)av);
+                    }
+                } else if (
+                    hd.tokenlen != 0 &&
+                    hd.token[0] == NGTCP2_CRYPTO_TOKEN_MAGIC_REGULAR
+                ) {
+                    now = net_quic_system_now();
+
+                    rv = ngtcp2_crypto_verify_regular_token(
+                        hd.token,
+                        hd.tokenlen,
+                        (const uint8_t *)secret,
+                        (size_t)secretlen,
+                        &peer_addr.sa,
+                        peer_addrlen,
+                        NET_QUIC_NEW_TOKEN_TIMEOUT,
+                        now
+                    );
+
+                    if (rv == 0) {
+                        av_push(av, newSViv(2));
+                        av_push(av, newSV(0));
+                        av_push(
+                            av,
+                            newSViv(NGTCP2_TOKEN_TYPE_NEW_TOKEN)
+                        );
+                        RETVAL = newRV_noinc((SV *)av);
+                    } else if (validate_address) {
+                        /*
+                         * An invalid NEW_TOKEN is not a fatal token error.
+                         * Treat the address as unvalidated and use Retry.
+                         */
+                        retry_scid.datalen = NET_QUIC_SERVER_CIDLEN;
+                        if (net_quic_random_bytes(
+                                retry_scid.data,
+                                retry_scid.datalen
+                            ) != 0) {
+                            croak("unable to generate Retry connection ID");
+                        }
+
+                        tokenlen = ngtcp2_crypto_generate_retry_token2(
+                            token,
+                            (const uint8_t *)secret,
+                            (size_t)secretlen,
+                            hd.version,
+                            &peer_addr.sa,
+                            peer_addrlen,
+                            &retry_scid,
+                            &hd.dcid,
+                            now
+                        );
+
+                        if (tokenlen < 0) {
+                            croak("unable to generate QUIC Retry token");
+                        }
+
+                        nwrite = ngtcp2_crypto_write_retry(
+                            response,
+                            sizeof(response),
+                            hd.version,
+                            &hd.scid,
+                            &retry_scid,
+                            &hd.dcid,
+                            token,
+                            (size_t)tokenlen
+                        );
+
+                        if (nwrite < 0) {
+                            croak("unable to write QUIC Retry packet");
+                        }
+
+                        av_push(av, newSViv(1));
+                        av_push(
+                            av,
+                            newSVpvn(
+                                (const char *)response,
+                                (STRLEN)nwrite
+                            )
+                        );
+                        RETVAL = newRV_noinc((SV *)av);
+                    } else {
+                        av_push(av, newSViv(2));
+                        av_push(av, newSV(0));
+                        av_push(
+                            av,
+                            newSViv(NGTCP2_TOKEN_TYPE_UNKNOWN)
+                        );
                         RETVAL = newRV_noinc((SV *)av);
                     }
                 } else if (hd.tokenlen != 0 && validate_address) {
@@ -2895,6 +2986,10 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                 } else {
                     av_push(av, newSViv(2));
                     av_push(av, newSV(0));
+                    av_push(
+                        av,
+                        newSViv(NGTCP2_TOKEN_TYPE_UNKNOWN)
+                    );
                     RETVAL = newRV_noinc((SV *)av);
                 }
             }

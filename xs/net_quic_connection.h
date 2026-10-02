@@ -689,6 +689,64 @@ net_quic_path_validation_cb(
         : NGTCP2_ERR_CALLBACK_FAILURE;
 }
 
+
+static int
+net_quic_select_preferred_addr_cb(
+    ngtcp2_conn *conn,
+    ngtcp2_path *dest,
+    const ngtcp2_preferred_addr *paddr,
+    void *user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    const ngtcp2_path *current;
+
+    (void)ep;
+
+    current = ngtcp2_conn_get_path2(conn);
+    if (current == NULL ||
+        current->local.addr == NULL ||
+        current->local.addrlen == 0) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    if (current->local.addr->sa_family == NGTCP2_AF_INET &&
+        paddr->ipv4_present) {
+        ngtcp2_addr_copy_byte(
+            &dest->local,
+            current->local.addr,
+            current->local.addrlen
+        );
+        ngtcp2_addr_copy_byte(
+            &dest->remote,
+            (const ngtcp2_sockaddr *)&paddr->ipv4,
+            (ngtcp2_socklen)sizeof(paddr->ipv4)
+        );
+        return 0;
+    }
+
+    if (current->local.addr->sa_family == NGTCP2_AF_INET6 &&
+        paddr->ipv6_present) {
+        ngtcp2_addr_copy_byte(
+            &dest->local,
+            current->local.addr,
+            current->local.addrlen
+        );
+        ngtcp2_addr_copy_byte(
+            &dest->remote,
+            (const ngtcp2_sockaddr *)&paddr->ipv6,
+            (ngtcp2_socklen)sizeof(paddr->ipv6)
+        );
+        return 0;
+    }
+
+    /*
+     * No preferred address matches the current local address family.
+     * Leaving dest untouched tells ngtcp2 to ignore the offer.
+     */
+    return 0;
+}
+
 static void
 net_quic_start_close_wait(
     net_quic_connection *ep,

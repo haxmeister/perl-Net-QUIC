@@ -86,6 +86,18 @@ sub _require_concrete_local {
     return;
 }
 
+
+sub _quic_version {
+    my ($class, $value, $name, $default) = @_;
+
+    $value = $default if !defined $value;
+
+    croak "$name must be 1 or 2"
+        if !defined($value) || $value !~ /\A[12]\z/;
+
+    return 0 + $value;
+}
+
 sub client {
     my ($class, %args) = @_;
 
@@ -104,6 +116,11 @@ sub client {
         : '';
 
     my $transport = $class->_transport_config(delete $args{transport});
+    my $version = $class->_quic_version(
+        delete $args{version},
+        'version',
+        1,
+    );
     my $session_ticket = delete $args{session_ticket};
     my $early_data = delete $args{early_data};
     my $address_token = delete $args{address_token};
@@ -132,6 +149,7 @@ sub client {
         $session_ticket,
         $early_transport,
         $address_token,
+        $version,
     );
 
     return bless {
@@ -156,6 +174,13 @@ sub server {
 
     my $transport = $class->_transport_config(delete $args{transport});
     my $preferred_address = delete $args{preferred_address};
+    my $preferred_version = delete $args{preferred_version};
+
+    $preferred_version = $class->_quic_version(
+        $preferred_version,
+        'preferred_version',
+        undef,
+    ) if defined $preferred_version;
 
     $class->_require_concrete_local($preferred_address)
         if defined $preferred_address;
@@ -168,6 +193,7 @@ sub server {
         server_secret       => $class->_server_secret,
         validate_address    => $args{validate_address} ? 1 : 0,
         preferred_address   => $preferred_address,
+        preferred_version   => $preferred_version,
         transport           => $transport,
         stateless_tx        => [],
         routes              => {},
@@ -275,6 +301,7 @@ sub _server_receive_datagram {
             $self->{preferred_address},
             $front->[2] // 0,
             $self->{validate_address},
+            $self->{preferred_version} // 0,
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);

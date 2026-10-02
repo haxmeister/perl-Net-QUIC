@@ -483,7 +483,50 @@ __END__
 
 =head1 NAME
 
-Net::QUIC::Endpoint - low-level QUIC transport boundary
+Net::QUIC::Endpoint - lower-level QUIC engine
+
+=head1 DESCRIPTION
+
+Endpoint is the low-level transport API underneath L<Net::QUIC::Driver>.
+
+Most applications should use Driver.
+
+Use Endpoint directly only when you want to manage the QUIC service cycle
+yourself.
+
+The caller owns:
+
+    the UDP socket
+    sending every outgoing datagram
+    draining all pending output
+    scheduling the next QUIC timeout
+    calling handle_timeout when that timer fires
+
+Endpoint owns the QUIC protocol state.
+
+A client Endpoint has one L<Net::QUIC::Connection>.
+
+A server Endpoint can manage many Connections behind one UDP socket.
+
+=head1 BASIC CYCLE
+
+A direct client integration looks like this:
+
+    receive one UDP packet
+        -> receive_datagram
+
+    send all pending output
+        -> next_datagram until undef
+
+    ask when QUIC next needs a timer
+        -> timeout_after
+
+    timer fires
+        -> handle_timeout
+
+Then drain C<next_datagram> again and schedule the new C<timeout_after>.
+
+Driver exists so most event-loop adapters do not have to repeat this logic.
 
 =head1 SYNOPSIS
 
@@ -499,60 +542,26 @@ Net::QUIC::Endpoint - low-level QUIC transport boundary
     my $connection = $endpoint->connection;
 
     while (my $datagram = $endpoint->next_datagram) {
-        $udp->send($datagram->data, $datagram->peer);
+        send_udp($datagram);
     }
 
-    my $after = $endpoint->timeout_after;
+    my $seconds = $endpoint->timeout_after;
 
-=head1 DESCRIPTION
+=head1 ADDRESSES
 
-Net::QUIC::Endpoint is the low-level boundary between QUIC and an event loop.
+C<local> and C<peer> are packed IPv4 or IPv6 socket addresses.
 
-Most integrations should use L<Net::QUIC::Driver>, which owns Endpoint output
-draining, backpressure pause/resume, and timeout replacement.
+C<local> must be the actual local address used by the packet.
 
-Direct Endpoint users own those rules themselves.
+Wildcard bind addresses such as:
 
-The event-loop integration owns the UDP socket and its timer. Endpoint owns the
-transport-facing side of QUIC and gives the integration datagrams to send and
-a timeout to schedule.
+    0.0.0.0
+    ::
 
-A QUIC connection is represented separately by L<Net::QUIC::Connection>.
-A client endpoint owns one connection. A server endpoint can manage several
-connections behind one UDP socket and routes incoming packets by QUIC
-destination connection ID.
+are not concrete QUIC paths.
 
-For a client integration, the basic cycle is:
-
-    UDP readable
-        -> receive_datagram
-        -> send each next_datagram
-        -> arm a timer for timeout_after
-
-    timer fires
-        -> handle_timeout
-        -> send each next_datagram
-        -> arm the timer again
-
-The C<local> and C<peer> addresses are packed socket addresses such as those
-returned by Perl's L<Socket> functions or by the networking framework in use.
-They must be IPv4 or IPv6 addresses.
-
-C<local> must identify the concrete local endpoint for the packet. Wildcard
-bind addresses C<0.0.0.0> and C<::> are rejected because they do not identify
-a QUIC network path.
-
-C<receive_datagram> accepts an optional fourth C<ecn> argument containing the
-two ECN bits read from the received IP header. The values are:
-
-    0   Not-ECT
-    1   ECT(1)
-    2   ECT(0)
-    3   CE
-
-Omitting the argument is equivalent to C<0>. An adapter that can read ECN from
-the socket should pass it so QUIC can report ECN counts and validate ECN on the
-path.
+If a server UDP socket is bound to a wildcard address, the integration must
+recover the real destination address of each received packet.
 
 =head1 METHODS
 
@@ -565,92 +574,72 @@ path.
         server_name => 'example.com',
     );
 
-Creates a client endpoint and its first L<Net::QUIC::Connection>.
+Creates a client Endpoint and its Connection.
 
-C<local>, C<peer>, C<alpn>, and C<server_name> are required.
+Required options are:
 
-C<version> optionally chooses the client's first-flight QUIC version:
+=over 4
 
-    version => 2,
+=item * C<local>
 
-Supported values are C<1> and C<2>. The default is C<1>.
+Packed local UDP address.
 
-Without saved version-specific state, Net::QUIC advertises both v1 and v2 as
-compatible versions. A compatible server can therefore negotiate the other
-supported version without an extra Version Negotiation round trip.
+=item * C<peer>
 
-Saved C<session_ticket>, C<address_token>, and C<early_data> values remember
-their QUIC version internally. Supplying one automatically chooses and locks the
-connection to that version. An explicitly conflicting C<version> is rejected
-before network I/O.
+Packed server UDP address.
 
-Server certificates are verified by default. Net::QUIC uses Picotls' OpenSSL
-certificate verifier, including certificate-chain validation and DNS-name or
-IP-address verification against C<server_name>. The verifier uses OpenSSL's
-default trust locations.
+=item * C<alpn>
 
-For a private or test certificate authority, C<ca_file> adds certificates from
-a PEM file to the default trust store:
+Application protocol name.
 
-    my $endpoint = Net::QUIC::Endpoint->client(
-        local       => $packed_local_address,
-        peer        => $packed_peer_address,
-        alpn        => 'my-protocol',
-        server_name => 'internal.example',
-        ca_file     => '/path/to/private-ca.pem',
-    );
+=item * C<server_name>
 
-Net::QUIC does not provide an insecure skip-verification switch.
+Name expected in the server certificate.
 
-A saved TLS session can be offered on a later connection with
-C<session_ticket>:
+=back
 
-    my $endpoint = Net::QUIC::Endpoint->client(
-        local          => $packed_local_address,
-        peer           => $packed_peer_address,
-        alpn           => 'my-protocol',
-        server_name    => 'example.com',
-        session_ticket => $saved_ticket,
-    );
+Server certificates are verified by default.
 
-C<$saved_ticket> is the opaque value previously returned by
-L<Net::QUIC::Connection/session_ticket>. Applications should normally cache it
-by server identity and ALPN.
+For a private or test CA:
 
-Supplying C<session_ticket> enables TLS handshake resumption only. It does not
-enable 0-RTT application data.
+    ca_file => '/path/to/private-ca.pem'
 
-A client can also reuse an address-validation token received through
-L<Net::QUIC::Connection/address_token>:
+adds that PEM file to the normal trust store.
 
-    address_token => $saved_address_token,
+Net::QUIC does not provide an insecure skip-verification option.
 
-The address token is opaque and is independent of TLS session resumption. When
-the server accepts the token, a later connection can prove its source address
-without paying another Retry round trip.
+=head3 Optional client features
 
-To deliberately attempt 0-RTT, pass the opaque state returned by
-L<Net::QUIC::Connection/early_data_state>:
+Choose the first QUIC version:
 
-    my $endpoint = Net::QUIC::Endpoint->client(
-        local       => $packed_local_address,
-        peer        => $packed_peer_address,
-        alpn        => 'my-protocol',
-        server_name => 'example.com',
-        early_data  => $saved_early_data_state,
-    );
+    version => 2
 
-C<early_data> and C<session_ticket> are mutually exclusive because the
-early-data state already contains its matching TLS session ticket.
+Supported values are 1 and 2. The default is 1.
 
-When C<early_data> is supplied, local streams may be opened before C<ready>
-becomes true. Data sent on those streams is TLS 0-RTT data and can be replayed.
-Only replay-safe operations should be sent this way.
+Resume a previous TLS session:
 
-If the server rejects 0-RTT, the TLS handshake can continue normally.
-L<Net::QUIC::Connection/early_data_status> reports the outcome.
+    session_ticket => $saved_ticket
 
-Both client and server accept an optional C<transport> hash:
+Reuse a previous address-validation token:
+
+    address_token => $saved_address_token
+
+Attempt 0-RTT early data:
+
+    early_data => $saved_early_data_state
+
+C<early_data> already contains its matching session ticket, so it cannot be
+combined with C<session_ticket>.
+
+Saved session, address-token, and early-data values are opaque. Net::QUIC
+remembers the QUIC version inside them and automatically uses the correct
+version.
+
+0-RTT data can be replayed. Only send operations that are safe to repeat.
+
+=head3 Transport limits
+
+Client and server both accept:
 
     transport => {
         handshake_timeout => 10,
@@ -661,33 +650,22 @@ Both client and server accept an optional C<transport> hash:
         max_uni_streams   => 100,
     }
 
-These are the Net::QUIC defaults.
+These are the defaults.
 
-C<handshake_timeout> and C<idle_timeout> are in seconds. Fractional seconds are
-accepted to millisecond precision. C<handshake_timeout> must be greater than
-zero. C<idle_timeout =E<gt> 0> disables the advertised idle timeout.
+C<handshake_timeout> is how long the initial connection setup may take.
 
-C<connection_window> is the initial connection-level receive flow-control
-credit in bytes. C<stream_window> is the initial per-stream receive credit and
-is used for bidirectional and unidirectional streams. Net::QUIC returns receive
-credit as the application consumes data, so these are starting windows rather
-than lifetime byte limits.
+C<idle_timeout> is how long an otherwise established connection may stay idle.
+A value of zero disables the advertised idle timeout.
 
-C<max_bidi_streams> and C<max_uni_streams> are the initial numbers of concurrent
-peer-initiated streams allowed. Closed peer streams return stream credit, so
-the values do not limit how many streams may exist over the life of a
+C<connection_window> is the starting receive allowance for the whole
 connection.
 
-Net::QUIC advertises active migration support. Client Connections can start a
-validated local-path change with L<Net::QUIC::Connection/migrate>.
+C<stream_window> is the starting receive allowance for each Stream.
 
-Migration is transport behavior rather than a transport tuning knob. The
-adapter still owns UDP sockets and must honor the exact source address carried
-by each C<Net::QUIC::Datagram>.
+C<max_bidi_streams> and C<max_uni_streams> are the initial numbers of
+peer-created streams that may exist at once.
 
-ACK timing, congestion control, packet sizing, PMTU behavior, and connection ID
-management remain ngtcp2/Net::QUIC policy rather than public knobs at this
-stage.
+These are flow-control starting values, not lifetime byte or stream limits.
 
 =head2 server
 
@@ -695,82 +673,74 @@ stage.
         alpn             => 'my-protocol',
         certificate_file => 'server-cert.pem',
         private_key_file => 'server-key.pem',
-        validate_address => 1,
     );
 
-Creates a server endpoint. The UDP socket still belongs to the integration
-layer. One server endpoint can route packets for multiple QUIC connections.
+Creates a server Endpoint.
 
-Unsupported QUIC versions are answered statelessly with Version Negotiation
-before a Connection object is created.
+One server Endpoint can manage many QUIC Connections.
 
-Net::QUIC servers support QUIC v1 and QUIC v2 and advertise both through
-Compatible Version Negotiation.
+Required options are:
 
-C<preferred_version> can be C<1> or C<2>. When set, a compatible client that
-started with the other supported version can switch during the same handshake:
+    alpn
+    certificate_file
+    private_key_file
 
-    preferred_version => 2,
+=head3 Address validation
 
-When omitted, the server keeps the client's chosen supported version.
+To require a new client to prove that it can receive packets at its source
+address:
 
-C<validate_address> is optional and defaults to false. When true, a new peer
-without a valid address token receives Retry instead of immediately creating a
-Connection. The Retry token is authenticated, bound to the peer socket address,
-and valid for 10 seconds.
+    validate_address => 1
 
-After a validated connection completes its handshake, Net::QUIC automatically
-sends NEW_TOKEN. A client can save that opaque token and offer it on a later
-connection with C<address_token>. A valid NEW_TOKEN proves the client address
-without another Retry round trip. NEW_TOKEN values are currently valid for 24
-hours and are bound to the client IP address rather than its source port.
+A new client may receive QUIC Retry before a full Connection is created.
 
-An invalid NEW_TOKEN is treated as an unvalidated address and can receive Retry.
-An invalid Retry token remains an INVALID_TOKEN error.
+After a validated handshake, Net::QUIC can issue NEW_TOKEN so a returning
+client can prove the same address without another Retry round trip.
 
-C<accept_early_data> is optional and defaults to false. Set it true only when
-the application is prepared to receive TLS 0-RTT stream data before the
-handshake is complete:
+The client exposes that opaque value through
+L<Net::QUIC::Connection/address_token>.
 
-    accept_early_data => 1,
+=head3 0-RTT
 
-0-RTT data is replayable. Enabling this option means the application is
-responsible for restricting pre-handshake work to operations that are safe to
-repeat.
+To allow replayable early data:
 
-C<preferred_address> optionally advertises another concrete packed IPv4 or IPv6
-server address:
+    accept_early_data => 1
 
-    preferred_address => $packed_preferred_server_address,
+Only enable this when the application knows how to handle operations that may
+be repeated.
 
-The adapter must actually receive and send UDP traffic for that address.
-Net::QUIC advertises a fresh Connection ID and stateless-reset token with the
-preferred address. A compatible client validates the preferred path before
-switching to it.
+=head3 QUIC version preference
 
-Finished Connections are retired automatically after QUIC's closing or
-draining period, and all of their CID routes are removed from the Endpoint at
-the same time.
+A server accepts QUIC v1 and v2.
 
-Server certificate and private-key files are loaded once when the Endpoint is
-constructed. Accepted Connections create their own Picotls sessions from that
-shared server TLS context instead of reopening or reparsing the credential
-files. Connections retain the shared context for as long as they need it.
+To prefer v2 when a compatible client starts with v1:
 
-Unknown short-header packets that cannot be routed to a live Connection can
-receive a Stateless Reset when they are large enough to do so safely. The
-Endpoint derives reset tokens from its private server secret and the destination
-connection ID, so it does not recreate Connection state just to send the reset.
-Unknown long-header packets and packets that are too small are dropped.
+    preferred_version => 2
+
+If this option is omitted, the server keeps the client's chosen supported
+version.
+
+=head3 Preferred server address
+
+A server can advertise another address for the same Connection:
+
+    preferred_address => $packed_server_address
+
+The client validates that path before switching to it.
+
+The UDP integration must actually be able to send and receive on the advertised
+address.
 
 =head2 connection
 
     my $connection = $endpoint->connection;
 
-Returns the client connection owned by a client endpoint.
+Client only.
 
-A server endpoint manages multiple connections, so calling C<connection> on a
-server endpoint is an error. Use C<next_connection> instead.
+Returns the client's Connection.
+
+A server manages many Connections, so server code uses
+L</next_connection> instead.
 
 =head2 next_connection
 
@@ -778,11 +748,15 @@ server endpoint is an error. Use C<next_connection> instead.
         ...
     }
 
-Server only. Returns the next newly created connection, or undef when there is
-none waiting.
+Server only.
 
-A connection can be returned before its TLS handshake is complete. Use
-C<$connection-E<gt>ready> when the application needs handshake readiness.
+Returns the next newly created Connection, or undef when none is waiting.
+
+A new Connection can be returned before its TLS handshake is complete. Check:
+
+    $connection->ready
+
+before ordinary application work.
 
 =head2 receive_datagram
 
@@ -790,14 +764,23 @@ C<$connection-E<gt>ready> when the application needs handshake readiness.
 
 Feeds one received UDP datagram into QUIC.
 
-C<$local> must be the packed concrete destination address on which the packet
-arrived. It must not be C<0.0.0.0> or C<::>.
+C<$local> must be the concrete local destination address for this packet.
 
-If the UDP socket is bound to a wildcard address, the integration must use the
-platform's packet-info or destination-address mechanism to recover this value.
-The Endpoint intentionally does not own or inspect the UDP socket.
+C<$peer> is the remote sender address.
 
-C<$peer> is the packed address of the remote sender.
+An ECN-aware integration can pass the packet's two-bit IP-header ECN value as a
+fourth argument:
+
+    $endpoint->receive_datagram($bytes, $local, $peer, $ecn);
+
+The values are:
+
+    0   Not-ECT
+    1   ECT(1)
+    2   ECT(0)
+    3   CE
+
+Omitting C<$ecn> is equivalent to zero.
 
 =head2 next_datagram
 
@@ -805,24 +788,69 @@ C<$peer> is the packed address of the remote sender.
         ...
     }
 
-Returns the next UDP datagram QUIC wants sent, or undef if none is ready.
+Returns the next complete UDP datagram QUIC wants sent.
+
+Returns undef when no output is waiting.
+
+The returned L<Net::QUIC::Datagram> contains the payload, local address, peer
+address, and ECN mark for the packet.
 
 =head2 timeout_after
 
     my $seconds = $endpoint->timeout_after;
 
-Returns the number of seconds until QUIC next needs timer service. It may
-return zero when the timeout is already due, or undef when no timeout is
-currently needed.
+Returns the number of seconds until QUIC next needs timer service.
 
-For a server endpoint this is the earliest timeout among all managed
-connections, so the integration still needs only one endpoint timer.
+It can return:
+
+=over 4
+
+=item * a positive number
+
+Schedule a one-shot timer for that many seconds.
+
+=item * zero
+
+The timeout is already due.
+
+=item * undef
+
+No timer is currently needed.
+
+=back
+
+For a server this is the earliest deadline among all managed Connections, so
+the integration still needs only one Endpoint timer.
 
 =head2 handle_timeout
 
     $endpoint->handle_timeout;
 
-Tells QUIC that its event-loop timer fired. After this call, drain
-C<next_datagram> again and arrange the new C<timeout_after> value.
+Reports that the Endpoint timer fired.
+
+After calling it:
+
+    drain next_datagram
+    ask timeout_after again
+
+=head1 WHEN TO USE ENDPOINT DIRECTLY
+
+Endpoint is useful for:
+
+    tests
+    unusual event-loop integrations
+    integrations that already have their own QUIC service loop
+
+For ordinary event-loop code, L<Net::QUIC::Driver> is simpler.
+
+=head1 SEE ALSO
+
+L<Net::QUIC>
+
+L<Net::QUIC::Driver>
+
+L<Net::QUIC::Connection>
+
+L<Net::QUIC::Datagram>
 
 =cut

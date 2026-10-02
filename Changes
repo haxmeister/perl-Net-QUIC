@@ -1,6 +1,14 @@
 Revision history for Net-QUIC
 
 Unreleased
+    - Add full client/server QUIC v2 transport support.
+    - Add RFC 9368 Compatible Version Negotiation for v1 and v2.
+    - Add client version => 1|2 and server preferred_version => 1|2.
+    - Add Connection->version and Connection->client_chosen_version.
+    - Bind TLS session tickets and NEW_TOKEN address tokens to the QUIC version
+      that issued them while keeping their public values opaque.
+    - Automatically select and lock the correct version when saved session,
+      address-token, or 0-RTT state is reused.
     - Verify that ngtcp2 PMTU discovery is active on established paths and
       restarts after validated path migration.
     - Add Connection->path_max_udp_payload_size for the discovered current-path

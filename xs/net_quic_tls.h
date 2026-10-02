@@ -22,6 +22,7 @@ static ptls_cipher_suite_t *net_quic_picotls_cipher_suites[] = {
 
 #define NET_QUIC_TICKET_KEY_NAME_LEN 16
 #define NET_QUIC_TICKET_KEY_LEN 32
+#define NET_QUIC_TICKET_VERSION_LEN 4
 #define NET_QUIC_TICKET_NONCE_LEN 12
 #define NET_QUIC_TICKET_TAG_LEN 16
 #define NET_QUIC_TICKET_LIFETIME 86400
@@ -67,12 +68,16 @@ static int
 net_quic_tls_ticket_encrypt(
     net_quic_ticket_encryptor *self,
     ptls_buffer_t *dst,
-    ptls_iovec_t src
+    ptls_iovec_t src,
+    uint32_t version
 )
 {
     EVP_CIPHER_CTX *ctx = NULL;
     uint8_t *out;
     uint8_t nonce[NET_QUIC_TICKET_NONCE_LEN];
+    uint8_t aad[
+        NET_QUIC_TICKET_KEY_NAME_LEN + NET_QUIC_TICKET_VERSION_LEN
+    ];
     int outlen = 0;
     int final_len = 0;
     int aad_len = 0;
@@ -81,6 +86,7 @@ net_quic_tls_ticket_encrypt(
     if (src.len > INT_MAX ||
         src.len > SIZE_MAX
             - NET_QUIC_TICKET_KEY_NAME_LEN
+            - NET_QUIC_TICKET_VERSION_LEN
             - NET_QUIC_TICKET_NONCE_LEN
             - NET_QUIC_TICKET_TAG_LEN) {
         return PTLS_ERROR_LIBRARY;
@@ -93,6 +99,7 @@ net_quic_tls_ticket_encrypt(
     if (ptls_buffer_reserve(
             dst,
             NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_VERSION_LEN
                 + NET_QUIC_TICKET_NONCE_LEN
                 + src.len
                 + NET_QUIC_TICKET_TAG_LEN
@@ -107,8 +114,15 @@ net_quic_tls_ticket_encrypt(
 
     out = dst->base + dst->off;
     memcpy(out, self->key_name, NET_QUIC_TICKET_KEY_NAME_LEN);
+    out[NET_QUIC_TICKET_KEY_NAME_LEN + 0] = (uint8_t)(version >> 24);
+    out[NET_QUIC_TICKET_KEY_NAME_LEN + 1] = (uint8_t)(version >> 16);
+    out[NET_QUIC_TICKET_KEY_NAME_LEN + 2] = (uint8_t)(version >> 8);
+    out[NET_QUIC_TICKET_KEY_NAME_LEN + 3] = (uint8_t)version;
+
+    memcpy(aad, out, sizeof(aad));
+
     memcpy(
-        out + NET_QUIC_TICKET_KEY_NAME_LEN,
+        out + NET_QUIC_TICKET_KEY_NAME_LEN + NET_QUIC_TICKET_VERSION_LEN,
         nonce,
         NET_QUIC_TICKET_NONCE_LEN
     );
@@ -125,12 +139,14 @@ net_quic_tls_ticket_encrypt(
             ctx,
             NULL,
             &aad_len,
-            self->key_name,
-            NET_QUIC_TICKET_KEY_NAME_LEN
+            aad,
+            (int)sizeof(aad)
         ) != 1 ||
         EVP_EncryptUpdate(
             ctx,
-            out + NET_QUIC_TICKET_KEY_NAME_LEN + NET_QUIC_TICKET_NONCE_LEN,
+            out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_VERSION_LEN
+                + NET_QUIC_TICKET_NONCE_LEN,
             &outlen,
             src.base,
             (int)src.len
@@ -138,6 +154,7 @@ net_quic_tls_ticket_encrypt(
         EVP_EncryptFinal_ex(
             ctx,
             out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_VERSION_LEN
                 + NET_QUIC_TICKET_NONCE_LEN
                 + outlen,
             &final_len
@@ -147,6 +164,7 @@ net_quic_tls_ticket_encrypt(
             EVP_CTRL_GCM_GET_TAG,
             NET_QUIC_TICKET_TAG_LEN,
             out + NET_QUIC_TICKET_KEY_NAME_LEN
+                + NET_QUIC_TICKET_VERSION_LEN
                 + NET_QUIC_TICKET_NONCE_LEN
                 + outlen
                 + final_len
@@ -155,6 +173,7 @@ net_quic_tls_ticket_encrypt(
     }
 
     dst->off += NET_QUIC_TICKET_KEY_NAME_LEN
+        + NET_QUIC_TICKET_VERSION_LEN
         + NET_QUIC_TICKET_NONCE_LEN
         + (size_t)outlen
         + (size_t)final_len
@@ -170,12 +189,17 @@ static int
 net_quic_tls_ticket_decrypt(
     net_quic_ticket_encryptor *self,
     ptls_buffer_t *dst,
-    ptls_iovec_t src
+    ptls_iovec_t src,
+    uint32_t expected_version
 )
 {
     EVP_CIPHER_CTX *ctx = NULL;
     const uint8_t *nonce;
     const uint8_t *ciphertext;
+    uint8_t aad[
+        NET_QUIC_TICKET_KEY_NAME_LEN + NET_QUIC_TICKET_VERSION_LEN
+    ];
+    uint32_t stored_version;
     const uint8_t *tag;
     size_t ciphertext_len;
     int outlen = 0;
@@ -184,6 +208,7 @@ net_quic_tls_ticket_decrypt(
     int ret = PTLS_ALERT_HANDSHAKE_FAILURE;
 
     if (src.len < NET_QUIC_TICKET_KEY_NAME_LEN
+            + NET_QUIC_TICKET_VERSION_LEN
             + NET_QUIC_TICKET_NONCE_LEN
             + NET_QUIC_TICKET_TAG_LEN ||
         !ptls_mem_equal(
@@ -194,10 +219,25 @@ net_quic_tls_ticket_decrypt(
         return PTLS_ALERT_HANDSHAKE_FAILURE;
     }
 
-    nonce = src.base + NET_QUIC_TICKET_KEY_NAME_LEN;
+    stored_version =
+        ((uint32_t)src.base[NET_QUIC_TICKET_KEY_NAME_LEN + 0] << 24) |
+        ((uint32_t)src.base[NET_QUIC_TICKET_KEY_NAME_LEN + 1] << 16) |
+        ((uint32_t)src.base[NET_QUIC_TICKET_KEY_NAME_LEN + 2] << 8) |
+        (uint32_t)src.base[NET_QUIC_TICKET_KEY_NAME_LEN + 3];
+
+    if (stored_version != expected_version) {
+        return PTLS_ALERT_HANDSHAKE_FAILURE;
+    }
+
+    memcpy(aad, src.base, sizeof(aad));
+
+    nonce = src.base
+        + NET_QUIC_TICKET_KEY_NAME_LEN
+        + NET_QUIC_TICKET_VERSION_LEN;
     ciphertext = nonce + NET_QUIC_TICKET_NONCE_LEN;
     ciphertext_len = src.len
         - NET_QUIC_TICKET_KEY_NAME_LEN
+        - NET_QUIC_TICKET_VERSION_LEN
         - NET_QUIC_TICKET_NONCE_LEN
         - NET_QUIC_TICKET_TAG_LEN;
     tag = ciphertext + ciphertext_len;
@@ -227,8 +267,8 @@ net_quic_tls_ticket_decrypt(
             ctx,
             NULL,
             &aad_len,
-            self->key_name,
-            NET_QUIC_TICKET_KEY_NAME_LEN
+            aad,
+            (int)sizeof(aad)
         ) != 1 ||
         EVP_DecryptUpdate(
             ctx,
@@ -448,16 +488,37 @@ net_quic_tls_encrypt_ticket(
     net_quic_ticket_encryptor *self =
         (net_quic_ticket_encryptor *)base;
 
+    ngtcp2_crypto_conn_ref *conn_ref;
+    net_quic_connection *ep;
+    uint32_t version;
     int rv;
     int replay;
 
-    (void)ptls;
-
-    if (is_encrypt) {
-        return net_quic_tls_ticket_encrypt(self, dst, src);
+    conn_ref = (ngtcp2_crypto_conn_ref *)*ptls_get_data_ptr(ptls);
+    if (conn_ref == NULL || conn_ref->user_data == NULL) {
+        return PTLS_ERROR_LIBRARY;
     }
 
-    rv = net_quic_tls_ticket_decrypt(self, dst, src);
+    ep = (net_quic_connection *)conn_ref->user_data;
+
+    if (is_encrypt) {
+        version = ngtcp2_conn_get_negotiated_version2(ep->conn);
+        if (version == 0) {
+            version = ngtcp2_conn_get_client_chosen_version2(ep->conn);
+        }
+        if (version == 0) {
+            return PTLS_ERROR_LIBRARY;
+        }
+
+        return net_quic_tls_ticket_encrypt(self, dst, src, version);
+    }
+
+    version = ngtcp2_conn_get_client_chosen_version2(ep->conn);
+    if (version == 0) {
+        return PTLS_ALERT_HANDSHAKE_FAILURE;
+    }
+
+    rv = net_quic_tls_ticket_decrypt(self, dst, src, version);
     if (rv != 0) {
         return rv;
     }
@@ -510,6 +571,21 @@ net_quic_tls_save_ticket(
 
     ep->session_ticket = copy;
     ep->session_ticket_len = input.len;
+    ep->session_ticket_version =
+        ngtcp2_conn_get_negotiated_version2(ep->conn);
+
+    if (ep->session_ticket_version == 0) {
+        ep->session_ticket_version =
+            ngtcp2_conn_get_client_chosen_version2(ep->conn);
+    }
+
+    if (ep->session_ticket_version == 0) {
+        ptls_clear_memory(ep->session_ticket, ep->session_ticket_len);
+        Safefree(ep->session_ticket);
+        ep->session_ticket = NULL;
+        ep->session_ticket_len = 0;
+        return PTLS_ERROR_LIBRARY;
+    }
 
     return 0;
 }

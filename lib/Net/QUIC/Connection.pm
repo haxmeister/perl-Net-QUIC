@@ -17,6 +17,92 @@ my $EARLY_DATA_MAGIC = "NQED";
 my $EARLY_DATA_VERSION = 1;
 my $EARLY_DATA_HEADER_LEN = 13;
 
+my $SAVED_STATE_VERSION = 1;
+my $SESSION_TICKET_MAGIC = "NQST";
+my $ADDRESS_TOKEN_MAGIC = "NQAT";
+
+sub _encode_saved_state {
+    my ($class, $magic, $version, $bytes) = @_;
+
+    die "invalid saved QUIC version"
+        if !defined($version) || $version !~ /\A[12]\z/;
+    die "saved QUIC state cannot be empty"
+        if !defined($bytes) || $bytes eq '';
+
+    return pack(
+        'a4CC',
+        $magic,
+        $SAVED_STATE_VERSION,
+        $version,
+    ) . $bytes;
+}
+
+sub _decode_saved_state {
+    my ($class, $magic, $name, $state) = @_;
+
+    die "$name cannot be empty"
+        if !defined($state) || ref($state) || $state eq '';
+
+    if (length($state) >= 6 && substr($state, 0, 4) eq $magic) {
+        my ($got_magic, $format, $version) =
+            unpack('a4CC', substr($state, 0, 6));
+
+        die "invalid Net::QUIC $name"
+            if $got_magic ne $magic
+            || $format != $SAVED_STATE_VERSION
+            || ($version != 1 && $version != 2)
+            || length($state) == 6;
+
+        return (substr($state, 6), $version);
+    }
+
+    # Net::QUIC 0.01 exposed raw values before QUIC v2 support.
+    # Those values could only have been created by a v1 connection.
+    return ($state, 1);
+}
+
+sub _decode_session_ticket {
+    my ($class, $state) = @_;
+    return $class->_decode_saved_state(
+        $SESSION_TICKET_MAGIC,
+        'session_ticket',
+        $state,
+    );
+}
+
+sub _decode_address_token {
+    my ($class, $state) = @_;
+    return $class->_decode_saved_state(
+        $ADDRESS_TOKEN_MAGIC,
+        'address_token',
+        $state,
+    );
+}
+
+sub session_ticket {
+    my ($self) = @_;
+    my $state = $self->_session_ticket_state;
+    return if !defined $state;
+
+    return __PACKAGE__->_encode_saved_state(
+        $SESSION_TICKET_MAGIC,
+        $state->[0],
+        $state->[1],
+    );
+}
+
+sub address_token {
+    my ($self) = @_;
+    my $state = $self->_address_token_state;
+    return if !defined $state;
+
+    return __PACKAGE__->_encode_saved_state(
+        $ADDRESS_TOKEN_MAGIC,
+        $state->[0],
+        $state->[1],
+    );
+}
+
 sub _encode_early_data_state {
     my ($class, $ticket, $transport) = @_;
 
@@ -299,6 +385,26 @@ Application work that requires an established connection should wait for
 C<ready>, unless the client deliberately opened a replay-safe 0-RTT stream
 using saved early-data state.
 
+=head2 client_chosen_version
+
+    my $first_version = $connection->client_chosen_version;
+
+Returns C<1> or C<2> for the version selected by the client for its first
+Initial packet.
+
+This can differ from L</version> after Compatible Version Negotiation.
+
+=head2 version
+
+    my $version = $connection->version;
+
+Returns the authenticated negotiated QUIC version, C<1> or C<2>. Before
+version negotiation has completed it can return undef.
+
+For example, a default v1 client connected to a server with
+C<preferred_version =E<gt> 2> keeps C<client_chosen_version> equal to C<1>
+while C<version> becomes C<2>.
+
 =head2 early_data_state
 
     my $state = $connection->early_data_state;
@@ -371,7 +477,9 @@ The application may store this byte string and pass it as C<session_ticket> on
 a later client Endpoint or Driver connection to the same server identity and
 ALPN.
 
-The ticket is opaque. Applications should not parse or modify it.
+The ticket is opaque. Applications should not parse or modify it. Net::QUIC
+records its QUIC version inside the opaque value and only reuses it with that
+version.
 
 Net::QUIC does not enable 0-RTT merely because a session ticket is supplied.
 This method currently provides handshake resumption only.
@@ -393,6 +501,8 @@ requiring another Retry round trip. The token is independent of TLS session
 tickets and can be cached alongside them.
 
 Address tokens are opaque. Applications should not parse or modify them.
+Net::QUIC records their QUIC version inside the opaque value and verifies the
+native token with a version-specific server secret.
 
 =head1 NETWORK PATHS
 

@@ -1,5 +1,33 @@
 #include "xs/net_quic_connection.h"
 
+static uint32_t
+net_quic_wire_version(int version)
+{
+    switch (version) {
+    case 1:
+        return NGTCP2_PROTO_VER_V1;
+    case 2:
+        return NGTCP2_PROTO_VER_V2;
+    default:
+        croak("QUIC version must be 1 or 2");
+    }
+
+    return NGTCP2_PROTO_VER_V1;
+}
+
+static int
+net_quic_public_version(uint32_t version)
+{
+    switch (version) {
+    case NGTCP2_PROTO_VER_V1:
+        return 1;
+    case NGTCP2_PROTO_VER_V2:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
 static int
 net_quic_stream_close_limit_cb(
     ngtcp2_conn *conn,
@@ -380,7 +408,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef, address_token_sv = &PL_sv_undef)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef, address_token_sv = &PL_sv_undef, version = 1, version_locked = 0)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -391,6 +419,8 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
     SV *session_ticket_sv
     SV *early_transport_sv
     SV *address_token_sv
+    int version
+    int version_locked
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -411,6 +441,8 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         STRLEN address_token_len = 0;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
+        uint32_t versions[2];
+        uint32_t chosen_version;
         ngtcp2_transport_params params;
         ngtcp2_path path;
         ngtcp2_cid dcid;
@@ -552,6 +584,18 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
 
+        chosen_version = net_quic_wire_version(version);
+        versions[0] = chosen_version;
+        versions[1] = chosen_version == NGTCP2_PROTO_VER_V1
+            ? NGTCP2_PROTO_VER_V2
+            : NGTCP2_PROTO_VER_V1;
+
+        settings.preferred_versions = versions;
+        settings.preferred_versionslen = version_locked ? 1 : 2;
+        settings.available_versions = versions;
+        settings.available_versionslen = version_locked ? 1 : 2;
+        settings.original_version = chosen_version;
+
         if (address_token != NULL) {
             settings.token = (const uint8_t *)address_token;
             settings.tokenlen = (size_t)address_token_len;
@@ -572,7 +616,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
             &dcid,
             &scid,
             &path,
-            NGTCP2_PROTO_VER_V1,
+            chosen_version,
             &callbacks,
             &settings,
             &params,
@@ -610,7 +654,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef, validated_token_type = 0, issue_new_token = 0)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef, validated_token_type = 0, issue_new_token = 0, preferred_version = 0)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -623,6 +667,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *preferred_address_sv
     int validated_token_type
     int issue_new_token
+    int preferred_version
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -647,6 +692,9 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         ngtcp2_pkt_hd hd;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
+        uint32_t available_versions[2];
+        uint32_t preferred_versions[2];
+        uint32_t server_preferred_version = 0;
         ngtcp2_transport_params params;
         ngtcp2_path path;
         ngtcp2_cid dcid;
@@ -824,6 +872,22 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
 
         ngtcp2_settings_default(&settings);
         settings.initial_ts = net_quic_now();
+
+        available_versions[0] = NGTCP2_PROTO_VER_V1;
+        available_versions[1] = NGTCP2_PROTO_VER_V2;
+        settings.available_versions = available_versions;
+        settings.available_versionslen = 2;
+
+        if (preferred_version != 0) {
+            server_preferred_version = net_quic_wire_version(preferred_version);
+            preferred_versions[0] = server_preferred_version;
+            preferred_versions[1] =
+                server_preferred_version == NGTCP2_PROTO_VER_V1
+                    ? NGTCP2_PROTO_VER_V2
+                    : NGTCP2_PROTO_VER_V1;
+            settings.preferred_versions = preferred_versions;
+            settings.preferred_versionslen = 2;
+        }
 
         if (validated_token_type != NGTCP2_TOKEN_TYPE_UNKNOWN) {
             if (hd.tokenlen == 0) {
@@ -2301,6 +2365,43 @@ ready(self)
     OUTPUT:
         RETVAL
 
+
+SV *
+version(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        uint32_t version;
+        int public_version;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        version = ngtcp2_conn_get_negotiated_version2(ep->conn);
+        public_version = net_quic_public_version(version);
+
+        if (public_version == 0) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSViv(public_version);
+        }
+    OUTPUT:
+        RETVAL
+
+int
+client_chosen_version(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        uint32_t version;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        version = ngtcp2_conn_get_client_chosen_version2(ep->conn);
+        RETVAL = net_quic_public_version(version);
+        if (RETVAL == 0) {
+            croak("unknown QUIC client-chosen version");
+        }
+    OUTPUT:
+        RETVAL
+
 int
 resumed(self)
     SV *self
@@ -2313,40 +2414,72 @@ resumed(self)
         RETVAL
 
 SV *
-session_ticket(self)
+_session_ticket_state(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        AV *av;
+        int public_version;
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (ep->session_ticket == NULL || ep->session_ticket_len == 0) {
+        if (ep->session_ticket == NULL ||
+            ep->session_ticket_len == 0 ||
+            ep->session_ticket_version == 0) {
             RETVAL = &PL_sv_undef;
         } else {
-            RETVAL = newSVpvn(
-                (const char *)ep->session_ticket,
-                (STRLEN)ep->session_ticket_len
+            public_version =
+                net_quic_public_version(ep->session_ticket_version);
+            if (public_version == 0) {
+                croak("unknown TLS session ticket QUIC version");
+            }
+
+            av = newAV();
+            av_push(av, newSViv(public_version));
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)ep->session_ticket,
+                    (STRLEN)ep->session_ticket_len
+                )
             );
+            RETVAL = newRV_noinc((SV *)av);
         }
     OUTPUT:
         RETVAL
 
 
 SV *
-address_token(self)
+_address_token_state(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        AV *av;
+        int public_version;
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (ep->address_token == NULL || ep->address_token_len == 0) {
+        if (ep->address_token == NULL ||
+            ep->address_token_len == 0 ||
+            ep->address_token_version == 0) {
             RETVAL = &PL_sv_undef;
         } else {
-            RETVAL = newSVpvn(
-                (const char *)ep->address_token,
-                (STRLEN)ep->address_token_len
+            public_version =
+                net_quic_public_version(ep->address_token_version);
+            if (public_version == 0) {
+                croak("unknown NEW_TOKEN QUIC version");
+            }
+
+            av = newAV();
+            av_push(av, newSViv(public_version));
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)ep->address_token,
+                    (STRLEN)ep->address_token_len
+                )
             );
+            RETVAL = newRV_noinc((SV *)av);
         }
     OUTPUT:
         RETVAL
@@ -2610,6 +2743,7 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
         ngtcp2_cid reset_cid;
         ngtcp2_stateless_reset_token reset_token;
         uint8_t token[NGTCP2_CRYPTO_MAX_RETRY_TOKENLEN2];
+        uint8_t regular_token_secret[NET_QUIC_SERVER_SECRET_LEN];
         uint8_t response[NGTCP2_MAX_UDP_PAYLOAD_SIZE];
         uint8_t reset_random[NET_QUIC_STATELESS_RESET_MAX_RANDLEN];
         uint8_t unused_random;
@@ -2866,15 +3000,28 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                 ) {
                     now = net_quic_system_now();
 
+                    if (net_quic_new_token_secret(
+                            regular_token_secret,
+                            (const uint8_t *)secret,
+                            hd.version
+                        ) != 0) {
+                        croak("unable to derive NEW_TOKEN version secret");
+                    }
+
                     rv = ngtcp2_crypto_verify_regular_token(
                         hd.token,
                         hd.tokenlen,
-                        (const uint8_t *)secret,
-                        (size_t)secretlen,
+                        regular_token_secret,
+                        sizeof(regular_token_secret),
                         &peer_addr.sa,
                         peer_addrlen,
                         NET_QUIC_NEW_TOKEN_TIMEOUT,
                         now
+                    );
+
+                    ptls_clear_memory(
+                        regular_token_secret,
+                        sizeof(regular_token_secret)
                     );
 
                     if (rv == 0) {

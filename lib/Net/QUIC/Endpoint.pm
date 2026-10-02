@@ -86,6 +86,18 @@ sub _require_concrete_local {
     return;
 }
 
+
+sub _quic_version {
+    my ($class, $value, $name, $default) = @_;
+
+    $value = $default if !defined $value;
+
+    croak "$name must be 1 or 2"
+        if !defined($value) || $value !~ /\A[12]\z/;
+
+    return 0 + $value;
+}
+
 sub client {
     my ($class, %args) = @_;
 
@@ -104,15 +116,12 @@ sub client {
         : '';
 
     my $transport = $class->_transport_config(delete $args{transport});
+    my $version_arg = delete $args{version};
     my $session_ticket = delete $args{session_ticket};
     my $early_data = delete $args{early_data};
     my $address_token = delete $args{address_token};
     my $early_transport;
-
-    croak "session_ticket cannot be empty"
-        if defined($session_ticket) && $session_ticket eq '';
-    croak "address_token cannot be empty"
-        if defined($address_token) && $address_token eq '';
+    my $saved_version;
 
     if (defined $early_data) {
         croak "session_ticket and early_data cannot be used together"
@@ -121,6 +130,36 @@ sub client {
         ($session_ticket, $early_transport) =
             Net::QUIC::Connection->_decode_early_data_state($early_data);
     }
+
+    if (defined $session_ticket) {
+        my $ticket_version;
+        ($session_ticket, $ticket_version) =
+            Net::QUIC::Connection->_decode_session_ticket($session_ticket);
+        $saved_version = $ticket_version;
+    }
+
+    if (defined $address_token) {
+        my $token_version;
+        ($address_token, $token_version) =
+            Net::QUIC::Connection->_decode_address_token($address_token);
+
+        croak "saved session and address token QUIC versions do not match"
+            if defined($saved_version)
+            && $saved_version != $token_version;
+
+        $saved_version = $token_version;
+    }
+
+    my $version = $class->_quic_version(
+        $version_arg,
+        'version',
+        defined($saved_version) ? $saved_version : 1,
+    );
+
+    croak "saved QUIC state belongs to version $saved_version, not version $version"
+        if defined($saved_version) && $version != $saved_version;
+
+    my $version_locked = defined($saved_version) ? 1 : 0;
 
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
@@ -132,6 +171,8 @@ sub client {
         $session_ticket,
         $early_transport,
         $address_token,
+        $version,
+        $version_locked,
     );
 
     return bless {
@@ -156,6 +197,13 @@ sub server {
 
     my $transport = $class->_transport_config(delete $args{transport});
     my $preferred_address = delete $args{preferred_address};
+    my $preferred_version = delete $args{preferred_version};
+
+    $preferred_version = $class->_quic_version(
+        $preferred_version,
+        'preferred_version',
+        undef,
+    ) if defined $preferred_version;
 
     $class->_require_concrete_local($preferred_address)
         if defined $preferred_address;
@@ -168,6 +216,7 @@ sub server {
         server_secret       => $class->_server_secret,
         validate_address    => $args{validate_address} ? 1 : 0,
         preferred_address   => $preferred_address,
+        preferred_version   => $preferred_version,
         transport           => $transport,
         stateless_tx        => [],
         routes              => {},
@@ -275,6 +324,7 @@ sub _server_receive_datagram {
             $self->{preferred_address},
             $front->[2] // 0,
             $self->{validate_address},
+            $self->{preferred_version} // 0,
         );
 
         $connection->_receive_datagram($bytes, $local, $peer);
@@ -493,6 +543,21 @@ Creates a client endpoint and its first L<Net::QUIC::Connection>.
 
 C<local>, C<peer>, C<alpn>, and C<server_name> are required.
 
+C<version> optionally chooses the client's first-flight QUIC version:
+
+    version => 2,
+
+Supported values are C<1> and C<2>. The default is C<1>.
+
+Without saved version-specific state, Net::QUIC advertises both v1 and v2 as
+compatible versions. A compatible server can therefore negotiate the other
+supported version without an extra Version Negotiation round trip.
+
+Saved C<session_ticket>, C<address_token>, and C<early_data> values remember
+their QUIC version internally. Supplying one automatically chooses and locks the
+connection to that version. An explicitly conflicting C<version> is rejected
+before network I/O.
+
 Server certificates are verified by default. Net::QUIC uses Picotls' OpenSSL
 certificate verifier, including certificate-chain validation and DNS-name or
 IP-address verification against C<server_name>. The verifier uses OpenSSL's
@@ -612,6 +677,16 @@ layer. One server endpoint can route packets for multiple QUIC connections.
 
 Unsupported QUIC versions are answered statelessly with Version Negotiation
 before a Connection object is created.
+
+Net::QUIC servers support QUIC v1 and QUIC v2 and advertise both through
+Compatible Version Negotiation.
+
+C<preferred_version> can be C<1> or C<2>. When set, a compatible client that
+started with the other supported version can switch during the same handshake:
+
+    preferred_version => 2,
+
+When omitted, the server keeps the client's chosen supported version.
 
 C<validate_address> is optional and defaults to false. When true, a new peer
 without a valid address token receives Retry instead of immediately creating a

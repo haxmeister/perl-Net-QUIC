@@ -428,7 +428,7 @@ does not guarantee one matching `next_data` call on the peer.
 If an application needs messages, it should put its own framing on the QUIC
 stream.
 
-## Stream completion and reset
+## Stream completion and directional aborts
 
 A clean peer FIN is visible through:
 
@@ -438,17 +438,30 @@ if ($stream->remote_finished) {
 }
 ```
 
-A stream can be aborted with:
+Abort this endpoint's send side with RESET_STREAM:
 
 ```perl
 $stream->reset($application_error_code);
 ```
 
-The local and remote reset codes are available separately:
+Abort this endpoint's receive side and ask the peer to stop with STOP_SENDING:
 
 ```perl
-my $local_code  = $stream->local_reset_code;
-my $remote_code = $stream->remote_reset_code;
+$stream->stop_sending($application_error_code);
+```
+
+The two directions are independent on bidirectional streams. Resetting the send
+side does not stop receiving, and STOP_SENDING does not stop this endpoint from
+sending in the opposite direction.
+
+The error codes are available separately:
+
+```perl
+my $local_reset = $stream->local_reset_code;
+my $peer_reset  = $stream->remote_reset_code;
+
+my $local_stop  = $stream->local_stop_sending_code;
+my $peer_stop   = $stream->remote_stop_sending_code;
 ```
 
 `closed` becomes true after ngtcp2 reports the stream completely closed.

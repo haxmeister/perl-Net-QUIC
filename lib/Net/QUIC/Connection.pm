@@ -17,6 +17,92 @@ my $EARLY_DATA_MAGIC = "NQED";
 my $EARLY_DATA_VERSION = 1;
 my $EARLY_DATA_HEADER_LEN = 13;
 
+my $SAVED_STATE_VERSION = 1;
+my $SESSION_TICKET_MAGIC = "NQST";
+my $ADDRESS_TOKEN_MAGIC = "NQAT";
+
+sub _encode_saved_state {
+    my ($class, $magic, $version, $bytes) = @_;
+
+    die "invalid saved QUIC version"
+        if !defined($version) || $version !~ /\A[12]\z/;
+    die "saved QUIC state cannot be empty"
+        if !defined($bytes) || $bytes eq '';
+
+    return pack(
+        'a4CC',
+        $magic,
+        $SAVED_STATE_VERSION,
+        $version,
+    ) . $bytes;
+}
+
+sub _decode_saved_state {
+    my ($class, $magic, $name, $state) = @_;
+
+    die "$name cannot be empty"
+        if !defined($state) || ref($state) || $state eq '';
+
+    if (length($state) >= 6 && substr($state, 0, 4) eq $magic) {
+        my ($got_magic, $format, $version) =
+            unpack('a4CC', substr($state, 0, 6));
+
+        die "invalid Net::QUIC $name"
+            if $got_magic ne $magic
+            || $format != $SAVED_STATE_VERSION
+            || ($version != 1 && $version != 2)
+            || length($state) == 6;
+
+        return (substr($state, 6), $version);
+    }
+
+    # Net::QUIC 0.01 exposed raw values before QUIC v2 support.
+    # Those values could only have been created by a v1 connection.
+    return ($state, 1);
+}
+
+sub _decode_session_ticket {
+    my ($class, $state) = @_;
+    return $class->_decode_saved_state(
+        $SESSION_TICKET_MAGIC,
+        'session_ticket',
+        $state,
+    );
+}
+
+sub _decode_address_token {
+    my ($class, $state) = @_;
+    return $class->_decode_saved_state(
+        $ADDRESS_TOKEN_MAGIC,
+        'address_token',
+        $state,
+    );
+}
+
+sub session_ticket {
+    my ($self) = @_;
+    my $state = $self->_session_ticket_state;
+    return if !defined $state;
+
+    return __PACKAGE__->_encode_saved_state(
+        $SESSION_TICKET_MAGIC,
+        $state->[0],
+        $state->[1],
+    );
+}
+
+sub address_token {
+    my ($self) = @_;
+    my $state = $self->_address_token_state;
+    return if !defined $state;
+
+    return __PACKAGE__->_encode_saved_state(
+        $ADDRESS_TOKEN_MAGIC,
+        $state->[0],
+        $state->[1],
+    );
+}
+
 sub _encode_early_data_state {
     my ($class, $ticket, $transport) = @_;
 

@@ -105,9 +105,19 @@ sub client {
 
     my $transport = $class->_transport_config(delete $args{transport});
     my $session_ticket = delete $args{session_ticket};
+    my $early_data = delete $args{early_data};
+    my $early_transport;
 
     croak "session_ticket cannot be empty"
         if defined($session_ticket) && $session_ticket eq '';
+
+    if (defined $early_data) {
+        croak "session_ticket and early_data cannot be used together"
+            if defined $session_ticket;
+
+        ($session_ticket, $early_transport) =
+            Net::QUIC::Connection->_decode_early_data_state($early_data);
+    }
 
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
@@ -117,6 +127,7 @@ sub client {
         $ca_file,
         $transport,
         $session_ticket,
+        $early_transport,
     );
 
     return bless {
@@ -136,6 +147,7 @@ sub server {
     my $server_tls = Net::QUIC::_ServerTLS->_new(
         $args{certificate_file},
         $args{private_key_file},
+        $args{accept_early_data} ? 1 : 0,
     );
 
     my $transport = $class->_transport_config(delete $args{transport});
@@ -502,8 +514,29 @@ C<$saved_ticket> is the opaque value previously returned by
 L<Net::QUIC::Connection/session_ticket>. Applications should normally cache it
 by server identity and ALPN.
 
-Supplying a ticket enables TLS handshake resumption only. It does not enable
-0-RTT application data.
+Supplying C<session_ticket> enables TLS handshake resumption only. It does not
+enable 0-RTT application data.
+
+To deliberately attempt 0-RTT, pass the opaque state returned by
+L<Net::QUIC::Connection/early_data_state>:
+
+    my $endpoint = Net::QUIC::Endpoint->client(
+        local       => $packed_local_address,
+        peer        => $packed_peer_address,
+        alpn        => 'my-protocol',
+        server_name => 'example.com',
+        early_data  => $saved_early_data_state,
+    );
+
+C<early_data> and C<session_ticket> are mutually exclusive because the
+early-data state already contains its matching TLS session ticket.
+
+When C<early_data> is supplied, local streams may be opened before C<ready>
+becomes true. Data sent on those streams is TLS 0-RTT data and can be replayed.
+Only replay-safe operations should be sent this way.
+
+If the server rejects 0-RTT, the TLS handshake can continue normally.
+L<Net::QUIC::Connection/early_data_status> reports the outcome.
 
 Both client and server accept an optional C<transport> hash:
 
@@ -562,6 +595,16 @@ Connection. The Retry token is authenticated, bound to the peer socket address,
 and valid for 10 seconds. Net::QUIC creates the Connection only after the peer
 returns a valid token. A token replayed from a different peer address is
 rejected without creating connection state.
+
+C<accept_early_data> is optional and defaults to false. Set it true only when
+the application is prepared to receive TLS 0-RTT stream data before the
+handshake is complete:
+
+    accept_early_data => 1,
+
+0-RTT data is replayable. Enabling this option means the application is
+responsible for restricting pre-handshake work to operations that are safe to
+repeat.
 
 Finished Connections are retired automatically after QUIC's closing or
 draining period, and all of their CID routes are removed from the Endpoint at

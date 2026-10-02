@@ -283,7 +283,12 @@ net_quic_tls_save_ticket(
     }
 
     memcpy(copy, input.base, input.len);
-    Safefree(ep->session_ticket);
+
+    if (ep->session_ticket != NULL) {
+        ptls_clear_memory(ep->session_ticket, ep->session_ticket_len);
+        Safefree(ep->session_ticket);
+    }
+
     ep->session_ticket = copy;
     ep->session_ticket_len = input.len;
 
@@ -411,6 +416,20 @@ net_quic_tls_on_client_hello(
     }
 
     ep = (net_quic_connection *)conn_ref->user_data;
+
+    /*
+     * Accept the client's SNI into the Picotls session.  Picotls includes
+     * this value in the session-ticket context, which prevents a ticket
+     * issued for one server name from resuming under a different name.
+     */
+    if (params->server_name.len != 0 &&
+        ptls_set_server_name(
+            ptls,
+            (const char *)params->server_name.base,
+            params->server_name.len
+        ) != 0) {
+        return PTLS_ALERT_INTERNAL_ERROR;
+    }
 
     for (i = 0; i < params->negotiated_protocols.count; ++i) {
         ptls_iovec_t proto = params->negotiated_protocols.list[i];

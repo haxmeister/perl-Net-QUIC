@@ -8,7 +8,7 @@ main
 
 Current implementation baseline:
 
-60a769f5a266ad53c80805fd2f54648789927e82
+e57f4b6a68657504cd9206f3b5b756a9f88a83da
 
 PR #5, "Add generic event-loop integration driver", is merged.
 
@@ -97,7 +97,8 @@ Recommended implementation order:
    - Final CI matrix: 15/15 PASS.
 
 4. Active migration and full path management. COMPLETE.
-   - Implemented in PR #17.
+   - Merged in PR #17.
+   - Main merge commit: e57f4b6a68657504cd9206f3b5b756a9f88a83da.
    - Connection->migrate starts validated client migration to a new local path.
    - Connection->path exposes the current local/peer network path.
    - Connection->path_validation_status reports

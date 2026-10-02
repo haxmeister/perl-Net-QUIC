@@ -667,9 +667,13 @@ identifies a stream that carried 0-RTT data. The flag remains available after
 the handshake completes.
 
 0-RTT data is replayable. Applications must restrict it to operations that are
-safe to repeat. Net::QUIC also makes each server session ticket single-use for
-0-RTT: replaying a ticket rejects its early data while still permitting
-ordinary TLS session resumption.
+safe to repeat. Net::QUIC also gives each server session ticket one 0-RTT
+allowance. The first successful use of the ticket consumes that allowance,
+including an ordinary resumed handshake that does not send early data. A later
+reuse can still resume TLS, but its early data is rejected.
+
+A successful resumed connection receives a fresh ticket, so applications should
+replace cached session or early-data state with the newest value.
 
 The early-data state is opaque and contains the matching TLS ticket and
 remembered QUIC transport parameters. Cache it for the same server identity and

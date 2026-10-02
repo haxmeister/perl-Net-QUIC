@@ -9,14 +9,6 @@ but Net::QUIC does not yet expose.
 
 ## Base QUIC and TLS features not yet implemented
 
-### 0-RTT / early data
-
-A returning client cannot currently send application stream data before the new
-handshake completes.
-
-This requires session resumption plus safe retention and validation of the
-transport parameters that matter to early data.
-
 ### Active connection migration
 
 Net::QUIC currently advertises active migration as disabled.
@@ -149,14 +141,13 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. 0-RTT / early data
-2. active migration and path management
-3. QUIC DATAGRAM
-4. preferred address and NEW_TOKEN
-5. PMTU discovery
-6. ECN
-7. complete QUIC v2 / compatible version negotiation
-8. qlog and advanced congestion-control configuration
+1. active migration and path management
+2. QUIC DATAGRAM
+3. preferred address and NEW_TOKEN
+4. PMTU discovery
+5. ECN
+6. complete QUIC v2 / compatible version negotiation
+7. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -168,6 +159,11 @@ The following should not be treated as missing:
 - TLS 1.3
 - TLS session resumption
 - opaque client session ticket save/reuse with full-handshake fallback
+- 0-RTT / early data
+- opaque client early-data state containing TLS and QUIC resumption state
+- explicit server early-data opt-in
+- 0-RTT rejection rollback
+- per-server 0-RTT replay protection
 - ALPN
 - server certificate verification
 - optional private CA files

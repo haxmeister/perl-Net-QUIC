@@ -529,6 +529,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
         callbacks.begin_path_validation = net_quic_begin_path_validation_cb;
         callbacks.path_validation = net_quic_path_validation_cb;
+        callbacks.select_preferred_addr = net_quic_select_preferred_addr_cb;
 
         if (net_quic_random_bytes(dcid.data, NGTCP2_MIN_INITIAL_DCIDLEN) != 0 ||
             net_quic_random_bytes(scid.data, 16) != 0) {
@@ -593,7 +594,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         RETVAL
 
 SV *
-_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef)
+_server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_sv = &PL_sv_undef, server_secret_sv = &PL_sv_undef, transport_sv = &PL_sv_undef, preferred_address_sv = &PL_sv_undef)
     const char *class
     SV *initial_sv
     SV *local_sv
@@ -603,6 +604,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
     SV *odcid_sv
     SV *server_secret_sv
     SV *transport_sv
+    SV *preferred_address_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *initial;
@@ -618,6 +620,11 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         STRLEN alpnlen;
         const char *odcid_data = NULL;
         STRLEN odcid_len = 0;
+        const char *preferred_address = NULL;
+        STRLEN preferred_address_len = 0;
+        ngtcp2_sockaddr_union preferred_addr_storage;
+        ngtcp2_socklen preferred_addrlen = 0;
+        int preferred_addr_present = 0;
         ngtcp2_version_cid vcid;
         ngtcp2_pkt_hd hd;
         ngtcp2_callbacks callbacks;
@@ -645,6 +652,24 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
             if (odcid_len == 0 || odcid_len > NGTCP2_MAX_CIDLEN) {
                 croak("original destination connection ID has invalid length");
             }
+        }
+        if (SvOK(preferred_address_sv)) {
+            preferred_address = SvPVbyte(
+                preferred_address_sv,
+                preferred_address_len
+            );
+            if (net_quic_copy_sockaddr(
+                    &preferred_addr_storage,
+                    &preferred_addrlen,
+                    preferred_address,
+                    preferred_address_len
+                ) != 0 ||
+                net_quic_sockaddr_is_unspecified(&preferred_addr_storage)) {
+                croak(
+                    "preferred_address must be a concrete packed IPv4 or IPv6 socket address"
+                );
+            }
+            preferred_addr_present = 1;
         }
 
         if (alpnlen == 0 || alpnlen > 255) {
@@ -799,6 +824,48 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
             croak("unable to generate server stateless reset token");
         }
 
+        if (preferred_addr_present) {
+            params.preferred_addr_present = 1;
+            params.preferred_addr.cid.datalen = NET_QUIC_SERVER_CIDLEN;
+
+            if (net_quic_random_bytes(
+                    params.preferred_addr.cid.data,
+                    params.preferred_addr.cid.datalen
+                ) != 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("unable to generate preferred-address connection ID");
+            }
+
+            rv = ngtcp2_crypto_generate_stateless_reset_token(
+                params.preferred_addr.stateless_reset_token,
+                ep->server_secret,
+                sizeof(ep->server_secret),
+                &params.preferred_addr.cid
+            );
+            if (rv != 0) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("unable to generate preferred-address reset token");
+            }
+
+            if (preferred_addr_storage.sa.sa_family == NGTCP2_AF_INET) {
+                memcpy(
+                    &params.preferred_addr.ipv4,
+                    &preferred_addr_storage.in,
+                    sizeof(params.preferred_addr.ipv4)
+                );
+                params.preferred_addr.ipv4_present = 1;
+            } else if (
+                preferred_addr_storage.sa.sa_family == NGTCP2_AF_INET6
+            ) {
+                memcpy(
+                    &params.preferred_addr.ipv6,
+                    &preferred_addr_storage.in6,
+                    sizeof(params.preferred_addr.ipv6)
+                );
+                params.preferred_addr.ipv6_present = 1;
+            }
+        }
+
         if (odcid_data != NULL) {
             ngtcp2_cid_init(
                 &params.original_dcid,
@@ -838,6 +905,16 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         if (net_quic_queue_cid_event(aTHX_ ep, 1, &scid) != 0) {
             net_quic_connection_free(aTHX_ ep);
             croak("unable to register server QUIC connection ID");
+        }
+
+        if (preferred_addr_present &&
+            net_quic_queue_cid_event(
+                aTHX_ ep,
+                1,
+                &params.preferred_addr.cid
+            ) != 0) {
+            net_quic_connection_free(aTHX_ ep);
+            croak("unable to register preferred-address connection ID");
         }
 
         if (net_quic_tls_server_finish(aTHX_ ep) != 0) {

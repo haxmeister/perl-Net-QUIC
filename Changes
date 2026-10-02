@@ -1,6 +1,8 @@
 Revision history for Net-QUIC
 
 0.02  2026-10-02
+    - Simplify the public documentation for readers who are new to QUIC,
+      event-loop integration, and the native implementation.
     - Add ECN metadata plumbing between UDP adapters and ngtcp2.
     - Add Datagram->ecn with the outgoing two-bit IP-header ECN codepoint.
     - Add an optional ECN argument to Endpoint->receive_datagram and

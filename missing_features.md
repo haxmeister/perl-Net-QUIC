@@ -9,15 +9,6 @@ but Net::QUIC does not yet expose.
 
 ## Base QUIC and TLS features not yet implemented
 
-### PMTU discovery and visibility
-
-ngtcp2 PMTU discovery is already enabled by its default settings, and ngtcp2
-restarts PMTU discovery after a validated path change.
-
-Net::QUIC has not yet added focused PMTU tests or exposed the discovered
-per-path maximum UDP payload size. Project 5 should verify the existing native
-behavior before deciding whether any additional public API is needed.
-
 ### ECN
 
 Net::QUIC does not currently:
@@ -117,11 +108,10 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. PMTU discovery verification and visibility
-2. complete QUIC v2 / compatible version negotiation
-3. ECN
-4. QUIC DATAGRAM
-5. qlog and advanced congestion-control configuration
+1. complete QUIC v2 / compatible version negotiation
+2. ECN
+3. QUIC DATAGRAM
+4. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -166,6 +156,9 @@ The following should not be treated as missing:
 - NEW_TOKEN future-connection address validation
 - opaque client address-token save/reuse
 - NEW_TOKEN fallback to Retry when the token does not validate the address
+- ngtcp2 PMTU discovery on established paths
+- PMTU discovery restart after validated path changes
+- Connection->path_max_udp_payload_size visibility
 - anti-amplification handling through ngtcp2
 - connection IDs
 - connection ID routing and retirement

@@ -213,8 +213,8 @@ net_quic_tls_ticket_decrypt(
             + NET_QUIC_TICKET_TAG_LEN ||
         !ptls_mem_equal(
             src.base,
-            aad,
-            (int)sizeof(aad)
+            self->key_name,
+            NET_QUIC_TICKET_KEY_NAME_LEN
         )) {
         return PTLS_ALERT_HANDSHAKE_FAILURE;
     }
@@ -267,8 +267,8 @@ net_quic_tls_ticket_decrypt(
             ctx,
             NULL,
             &aad_len,
-            self->key_name,
-            NET_QUIC_TICKET_KEY_NAME_LEN
+            aad,
+            (int)sizeof(aad)
         ) != 1 ||
         EVP_DecryptUpdate(
             ctx,

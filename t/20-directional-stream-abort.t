@@ -120,9 +120,26 @@ my $reset_id = $reset_client->id;
 
 ok(!defined($reset_client->local_reset_code),
     'local reset code starts undefined');
+
+$reset_client->send("queued-before-reset\n");
+my $before_reset_stats = $client->connection->_stream_tx_stats($reset_id);
+cmp_ok(
+    $before_reset_stats->[1],
+    '>',
+    0,
+    'RESET_STREAM test begins with queued transmit bytes',
+);
+
 $reset_client->reset(77);
 is($reset_client->local_reset_code, 77,
     'reset records the local RESET_STREAM code');
+
+my $after_reset_stats = $client->connection->_stream_tx_stats($reset_id);
+is(
+    $after_reset_stats->[1],
+    0,
+    'RESET_STREAM immediately releases queued transmit bytes',
+);
 
 my $reset_server;
 for (1 .. 200) {

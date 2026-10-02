@@ -116,14 +116,42 @@ sub local_reset_code {
     return $self->{connection}->_stream_local_reset_code($self->{id});
 }
 
+sub remote_stop_sending_code {
+    my ($self) = @_;
+    return $self->{connection}->_stream_remote_stop_sending_code($self->{id});
+}
+
+sub local_stop_sending_code {
+    my ($self) = @_;
+    return $self->{connection}->_stream_local_stop_sending_code($self->{id});
+}
+
 sub reset {
     my ($self, $app_error_code) = @_;
+
+    croak "cannot reset the send side of this QUIC stream"
+        if !$self->can_send;
 
     $app_error_code = 0 if !defined $app_error_code;
     croak "application error code must be a non-negative integer"
         if $app_error_code !~ /\A\d+\z/;
 
     $self->{connection}->_stream_reset($self->{id}, $app_error_code);
+    $self->{connection}->_notify_output;
+    return;
+}
+
+sub stop_sending {
+    my ($self, $app_error_code) = @_;
+
+    croak "cannot stop the receive side of this QUIC stream"
+        if !$self->can_receive;
+
+    $app_error_code = 0 if !defined $app_error_code;
+    croak "application error code must be a non-negative integer"
+        if $app_error_code !~ /\A\d+\z/;
+
+    $self->{connection}->_stream_stop_sending($self->{id}, $app_error_code);
     $self->{connection}->_notify_output;
     return;
 }
@@ -155,9 +183,13 @@ Check for a clean peer FIN:
         ...
     }
 
-Abort the stream:
+Abort the local send side:
 
     $stream->reset($application_error_code);
+
+Stop the peer from sending more data:
+
+    $stream->stop_sending($application_error_code);
 
 =head1 DESCRIPTION
 
@@ -289,7 +321,30 @@ or:
 
     $stream->reset($application_error_code);
 
-Aborts the local stream send side with a QUIC application error code.
+Aborts the local stream send side with a QUIC RESET_STREAM frame and an
+application error code.
+
+Queued transmit data that has not already completed is discarded.
+
+The receive side is independent. On a bidirectional stream, calling C<reset>
+does not prevent the peer from continuing to send data back.
+
+The code defaults to zero.
+
+=head2 stop_sending
+
+    $stream->stop_sending;
+
+or:
+
+    $stream->stop_sending($application_error_code);
+
+Stops the local receive side abruptly and asks the peer to stop transmitting
+with a QUIC STOP_SENDING frame.
+
+Unread buffered receive data is discarded. On a bidirectional stream, the
+local send side remains independent and can continue sending unless the peer
+also asks it to stop.
 
 The code defaults to zero.
 
@@ -309,6 +364,23 @@ undef if this endpoint has not reset the stream.
 
 Keeping local and remote reset codes separate makes the reset direction
 unambiguous.
+
+=head2 remote_stop_sending_code
+
+    my $code = $stream->remote_stop_sending_code;
+
+Returns the application error code when the peer sent STOP_SENDING for this
+endpoint's send side, or undef if no such request has been received.
+
+Receiving STOP_SENDING causes QUIC to abort this endpoint's send side with the
+same application error code.
+
+=head2 local_stop_sending_code
+
+    my $code = $stream->local_stop_sending_code;
+
+Returns the application error code passed to C<stop_sending> on this endpoint,
+or undef if this endpoint has not stopped its receive side.
 
 =head2 closed
 

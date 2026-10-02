@@ -744,6 +744,17 @@ $datagram->local
 $datagram->peer
 ```
 
+Path MTU discovery is handled by ngtcp2 automatically. The current discovered
+UDP payload ceiling is available through:
+
+```perl
+my $bytes = $connection->path_max_udp_payload_size;
+```
+
+A new path starts at 1200 bytes. On a lossless ordinary Ethernet path, PMTUD can
+raise that ceiling toward ngtcp2's configured transmit maximum. Discovery is
+restarted after a validated path change.
+
 A server can optionally advertise another address for the same connection:
 
 ```perl

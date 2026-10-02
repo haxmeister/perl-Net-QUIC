@@ -2413,40 +2413,72 @@ resumed(self)
         RETVAL
 
 SV *
-session_ticket(self)
+_session_ticket_state(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        AV *av;
+        int public_version;
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (ep->session_ticket == NULL || ep->session_ticket_len == 0) {
+        if (ep->session_ticket == NULL ||
+            ep->session_ticket_len == 0 ||
+            ep->session_ticket_version == 0) {
             RETVAL = &PL_sv_undef;
         } else {
-            RETVAL = newSVpvn(
-                (const char *)ep->session_ticket,
-                (STRLEN)ep->session_ticket_len
+            public_version =
+                net_quic_public_version(ep->session_ticket_version);
+            if (public_version == 0) {
+                croak("unknown TLS session ticket QUIC version");
+            }
+
+            av = newAV();
+            av_push(av, newSViv(public_version));
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)ep->session_ticket,
+                    (STRLEN)ep->session_ticket_len
+                )
             );
+            RETVAL = newRV_noinc((SV *)av);
         }
     OUTPUT:
         RETVAL
 
 
 SV *
-address_token(self)
+_address_token_state(self)
     SV *self
     PREINIT:
         net_quic_connection *ep;
+        AV *av;
+        int public_version;
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (ep->address_token == NULL || ep->address_token_len == 0) {
+        if (ep->address_token == NULL ||
+            ep->address_token_len == 0 ||
+            ep->address_token_version == 0) {
             RETVAL = &PL_sv_undef;
         } else {
-            RETVAL = newSVpvn(
-                (const char *)ep->address_token,
-                (STRLEN)ep->address_token_len
+            public_version =
+                net_quic_public_version(ep->address_token_version);
+            if (public_version == 0) {
+                croak("unknown NEW_TOKEN QUIC version");
+            }
+
+            av = newAV();
+            av_push(av, newSViv(public_version));
+            av_push(
+                av,
+                newSVpvn(
+                    (const char *)ep->address_token,
+                    (STRLEN)ep->address_token_len
+                )
             );
+            RETVAL = newRV_noinc((SV *)av);
         }
     OUTPUT:
         RETVAL

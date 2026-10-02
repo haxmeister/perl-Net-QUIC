@@ -396,6 +396,19 @@ Address tokens are opaque. Applications should not parse or modify them.
 
 =head1 NETWORK PATHS
 
+=head2 path_max_udp_payload_size
+
+    my $bytes = $connection->path_max_udp_payload_size;
+
+Returns ngtcp2's currently discovered maximum UDP payload size for the active
+network path.
+
+A new path begins at QUIC's 1200-byte minimum. ngtcp2 performs PMTU discovery
+after the handshake and again after a validated path change, increasing this
+value as larger probes are acknowledged.
+
+This is the UDP payload ceiling, not the IP-layer MTU.
+
 =head2 path
 
     my $path = $connection->path;

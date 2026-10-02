@@ -6,7 +6,7 @@ Current branch:
 
 main
 
-Current main baseline:
+Current implementation baseline:
 
 60a769f5a266ad53c80805fd2f54648789927e82
 

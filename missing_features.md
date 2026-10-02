@@ -9,12 +9,6 @@ but Net::QUIC does not yet expose.
 
 ## Base QUIC and TLS features not yet implemented
 
-### NEW_TOKEN support
-
-Net::QUIC supports Retry and Retry-token address validation, but it does not
-yet implement the separate NEW_TOKEN mechanism for giving a client a token it
-can use on a future connection.
-
 ### PMTU discovery and visibility
 
 ngtcp2 PMTU discovery is already enabled by its default settings, and ngtcp2
@@ -123,12 +117,11 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. NEW_TOKEN
-2. ECN
-3. complete QUIC v2 / compatible version negotiation
-4. PMTU discovery verification and visibility
-5. QUIC DATAGRAM
-6. qlog and advanced congestion-control configuration
+1. PMTU discovery verification and visibility
+2. complete QUIC v2 / compatible version negotiation
+3. ECN
+4. QUIC DATAGRAM
+5. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -170,6 +163,9 @@ The following should not be treated as missing:
 - congestion control
 - Retry
 - Retry-token address validation
+- NEW_TOKEN future-connection address validation
+- opaque client address-token save/reuse
+- NEW_TOKEN fallback to Retry when the token does not validate the address
 - anti-amplification handling through ngtcp2
 - connection IDs
 - connection ID routing and retirement

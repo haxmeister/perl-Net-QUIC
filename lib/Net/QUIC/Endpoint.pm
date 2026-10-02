@@ -566,9 +566,12 @@ peer-initiated streams allowed. Closed peer streams return stream credit, so
 the values do not limit how many streams may exist over the life of a
 connection.
 
-Net::QUIC currently advertises active migration as disabled. Migration is not
-exposed as a tuning option until the library implements and tests migration
-semantics.
+Net::QUIC advertises active migration support. Client Connections can start a
+validated local-path change with L<Net::QUIC::Connection/migrate>.
+
+Migration is transport behavior rather than a transport tuning knob. The
+adapter still owns UDP sockets and must honor the exact source address carried
+by each C<Net::QUIC::Datagram>.
 
 ACK timing, congestion control, packet sizing, PMTU behavior, and connection ID
 management remain ngtcp2/Net::QUIC policy rather than public knobs at this

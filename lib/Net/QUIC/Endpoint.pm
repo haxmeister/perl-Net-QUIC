@@ -104,6 +104,10 @@ sub client {
         : '';
 
     my $transport = $class->_transport_config(delete $args{transport});
+    my $session_ticket = delete $args{session_ticket};
+
+    croak "session_ticket cannot be empty"
+        if defined($session_ticket) && $session_ticket eq '';
 
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
@@ -112,6 +116,7 @@ sub client {
         $args{server_name},
         $ca_file,
         $transport,
+        $session_ticket,
     );
 
     return bless {
@@ -481,6 +486,24 @@ a PEM file to the default trust store:
     );
 
 Net::QUIC does not provide an insecure skip-verification switch.
+
+A saved TLS session can be offered on a later connection with
+C<session_ticket>:
+
+    my $endpoint = Net::QUIC::Endpoint->client(
+        local          => $packed_local_address,
+        peer           => $packed_peer_address,
+        alpn           => 'my-protocol',
+        server_name    => 'example.com',
+        session_ticket => $saved_ticket,
+    );
+
+C<$saved_ticket> is the opaque value previously returned by
+L<Net::QUIC::Connection/session_ticket>. Applications should normally cache it
+by server identity and ALPN.
+
+Supplying a ticket enables TLS handshake resumption only. It does not enable
+0-RTT application data.
 
 Both client and server accept an optional C<transport> hash:
 

@@ -567,6 +567,48 @@ Server certificate and key files are loaded when the server Endpoint is
 created. Accepted Connections reuse the shared server TLS credential context;
 the files are not reopened for every Connection.
 
+## TLS session resumption
+
+A client Connection can return an opaque TLS session ticket:
+
+```perl
+my $ticket = $connection->session_ticket;
+```
+
+A later client connection can offer that ticket:
+
+```perl
+my $driver = Net::QUIC::Driver->client(
+    ...
+    session_ticket => $ticket,
+);
+```
+
+After the handshake completes:
+
+```perl
+if ($driver->connection->resumed) {
+    ...
+}
+```
+
+reports whether TLS actually resumed the previous session.
+
+Applications should treat the ticket as opaque bytes and cache it for the same
+server identity and ALPN. Net::QUIC does not require an application to use a
+particular cache or persistence mechanism.
+
+If a ticket is expired, invalid, or belongs to an older server ticket key, TLS
+falls back to a normal full handshake instead of failing the connection.
+
+The server Endpoint keeps one randomly generated session-ticket key for its
+lifetime. Connections accepted by that Endpoint share the key. Recreating the
+server Endpoint creates a new key, so tickets issued by the old Endpoint no
+longer resume and instead fall back to a full handshake.
+
+Session resumption does not enable 0-RTT. Application data still waits for the
+normal QUIC/TLS handshake readiness rules.
+
 ## Transport defaults
 
 Client and server constructors accept an optional `transport` hash:
@@ -645,7 +687,7 @@ The first transport release does not need to include later QUIC features such
 as:
 
 ```text
-session resumption and 0-RTT
+0-RTT / early data
 connection migration
 QUIC DATAGRAM
 qlog

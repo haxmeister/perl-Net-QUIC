@@ -374,7 +374,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -382,6 +382,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
     SV *server_name_sv
     SV *ca_file_sv
     SV *transport_sv
+    SV *session_ticket_sv
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -389,11 +390,13 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         const char *alpn;
         const char *server_name;
         const char *ca_file;
+        const char *session_ticket = NULL;
         STRLEN locallen;
         STRLEN peerlen;
         STRLEN alpnlen;
         STRLEN server_namelen;
         STRLEN ca_file_len;
+        STRLEN session_ticket_len = 0;
         ngtcp2_callbacks callbacks;
         ngtcp2_settings settings;
         ngtcp2_transport_params params;
@@ -408,6 +411,12 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         alpn = SvPVbyte(alpn_sv, alpnlen);
         server_name = SvPVbyte(server_name_sv, server_namelen);
         ca_file = SvPVbyte(ca_file_sv, ca_file_len);
+        if (SvOK(session_ticket_sv)) {
+            session_ticket = SvPVbyte(session_ticket_sv, session_ticket_len);
+            if (session_ticket_len == 0) {
+                croak("session_ticket cannot be empty");
+            }
+        }
 
         if (alpnlen == 0 || alpnlen > 255) {
             croak("alpn must contain 1 to 255 bytes");
@@ -452,6 +461,16 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         if (ep->alpn == NULL || ep->server_name == NULL) {
             net_quic_connection_free(aTHX_ ep);
             croak("unable to allocate Net::QUIC::Connection strings");
+        }
+
+        if (session_ticket != NULL) {
+            Newx(ep->resume_ticket, session_ticket_len, uint8_t);
+            if (ep->resume_ticket == NULL) {
+                net_quic_connection_free(aTHX_ ep);
+                croak("unable to allocate TLS session ticket");
+            }
+            memcpy(ep->resume_ticket, session_ticket, (size_t)session_ticket_len);
+            ep->resume_ticket_len = (size_t)session_ticket_len;
         }
 
         ep->conn_ref.get_conn = net_quic_get_conn;
@@ -1960,6 +1979,36 @@ ready(self)
     CODE:
         ep = net_quic_connection_from_sv(self);
         RETVAL = ep->ready ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+int
+resumed(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = ep->resumed ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+SV *
+session_ticket(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (ep->session_ticket == NULL || ep->session_ticket_len == 0) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVpvn(
+                (const char *)ep->session_ticket,
+                (STRLEN)ep->session_ticket_len
+            );
+        }
     OUTPUT:
         RETVAL
 

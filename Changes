@@ -6,6 +6,12 @@ Unreleased
     - Add Stream->stop_sending for aborting the local receive side.
     - Expose local and peer STOP_SENDING application error codes.
     - Preserve the opposite direction of bidirectional streams after either directional abort.
+    - Add TLS 1.3 session resumption with opaque client session tickets.
+    - Add Connection->session_ticket and Connection->resumed.
+    - Protect server session tickets with a per-server AES-256-GCM key.
+    - Fall back to a full handshake when a saved ticket is expired, invalid,
+      or belongs to a different server ticket key.
+    - Keep 0-RTT disabled; early data remains a separate future feature.
 
 0.01  2026-09-29
     - First stable CPAN release.

@@ -9,14 +9,6 @@ but Net::QUIC does not yet expose.
 
 ## Base QUIC and TLS features not yet implemented
 
-### TLS session resumption
-
-Net::QUIC does not currently save and reuse TLS session tickets to resume a
-previous QUIC connection.
-
-This is separate from 0-RTT. Session resumption can be useful even when early
-application data is not enabled.
-
 ### 0-RTT / early data
 
 A returning client cannot currently send application stream data before the new
@@ -157,15 +149,14 @@ other advanced recovery knobs.
 
 The largest remaining feature groups are:
 
-1. TLS session resumption
-2. 0-RTT / early data
-3. active migration and path management
-4. QUIC DATAGRAM
-5. preferred address and NEW_TOKEN
-6. PMTU discovery
-7. ECN
-8. complete QUIC v2 / compatible version negotiation
-9. qlog and advanced congestion-control configuration
+1. 0-RTT / early data
+2. active migration and path management
+3. QUIC DATAGRAM
+4. preferred address and NEW_TOKEN
+5. PMTU discovery
+6. ECN
+7. complete QUIC v2 / compatible version negotiation
+8. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -175,6 +166,8 @@ The following should not be treated as missing:
 - server acceptance of negotiated QUIC versions
 - Version Negotiation responses
 - TLS 1.3
+- TLS session resumption
+- opaque client session ticket save/reuse with full-handshake fallback
 - ALPN
 - server certificate verification
 - optional private CA files

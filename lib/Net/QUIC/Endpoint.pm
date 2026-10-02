@@ -543,6 +543,21 @@ Creates a client endpoint and its first L<Net::QUIC::Connection>.
 
 C<local>, C<peer>, C<alpn>, and C<server_name> are required.
 
+C<version> optionally chooses the client's first-flight QUIC version:
+
+    version => 2,
+
+Supported values are C<1> and C<2>. The default is C<1>.
+
+Without saved version-specific state, Net::QUIC advertises both v1 and v2 as
+compatible versions. A compatible server can therefore negotiate the other
+supported version without an extra Version Negotiation round trip.
+
+Saved C<session_ticket>, C<address_token>, and C<early_data> values remember
+their QUIC version internally. Supplying one automatically chooses and locks the
+connection to that version. An explicitly conflicting C<version> is rejected
+before network I/O.
+
 Server certificates are verified by default. Net::QUIC uses Picotls' OpenSSL
 certificate verifier, including certificate-chain validation and DNS-name or
 IP-address verification against C<server_name>. The verifier uses OpenSSL's
@@ -662,6 +677,16 @@ layer. One server endpoint can route packets for multiple QUIC connections.
 
 Unsupported QUIC versions are answered statelessly with Version Negotiation
 before a Connection object is created.
+
+Net::QUIC servers support QUIC v1 and QUIC v2 and advertise both through
+Compatible Version Negotiation.
+
+C<preferred_version> can be C<1> or C<2>. When set, a compatible client that
+started with the other supported version can switch during the same handshake:
+
+    preferred_version => 2,
+
+When omitted, the server keeps the client's chosen supported version.
 
 C<validate_address> is optional and defaults to false. When true, a new peer
 without a valid address token receives Retry instead of immediately creating a

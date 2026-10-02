@@ -8,7 +8,7 @@ main
 
 Current implementation baseline:
 
-e57f4b6a68657504cd9206f3b5b756a9f88a83da
+bb19e523e49493e78d672ab33897bb8d70773a27
 
 PR #5, "Add generic event-loop integration driver", is merged.
 
@@ -127,8 +127,16 @@ Recommended implementation order:
        * tokens use ngtcp2's regular-token format, the Endpoint server secret,
          IP-address binding, and a 24-hour lifetime.
        * final CI matrix: 15/15 PASS.
-   - Verify the PMTU discovery already enabled by ngtcp2 and expose per-path
-     packet-size state only if it is useful.
+   - PMTU verification/visibility is complete in PR #19:
+       * ngtcp2 PMTUD is confirmed active after handshake completion.
+       * Connection->path_max_udp_payload_size exposes the discovered current
+         path UDP payload ceiling.
+       * a new path begins at QUIC's 1200-byte baseline.
+       * PMTUD restarts after validated migration and independently raises the
+         ceiling on the new path.
+       * no duplicate PMTU subsystem or Driver API was added.
+       * merge commit: bb19e523e49493e78d672ab33897bb8d70773a27.
+       * final CI matrix: 15/15 PASS.
    - ECN receive/transmit plumbing and validation state.
    - Complete QUIC v2 client selection and compatible version negotiation.
    - These belong last because PMTU and ECN should build on the finished path

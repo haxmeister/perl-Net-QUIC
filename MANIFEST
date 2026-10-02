@@ -45,6 +45,7 @@ t/20-directional-stream-abort.t
 t/21-session-resumption.t
 t/22-early-data.t
 t/23-path-migration.t
+t/24-preferred-address.t
 t/data/server-cert.pem
 t/data/server-key.pem
 xs/net_quic_connection.h

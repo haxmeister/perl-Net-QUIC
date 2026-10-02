@@ -467,7 +467,8 @@ static const char *
 net_quic_server_tls_init(
     net_quic_server_tls *tls,
     const char *cert_file,
-    const char *key_file
+    const char *key_file,
+    int accept_early_data
 )
 {
     FILE *fp;
@@ -494,7 +495,8 @@ net_quic_server_tls_init(
 
     tls->ptls_ctx.encrypt_ticket = &tls->ticket_encryptor.super;
     tls->ptls_ctx.ticket_lifetime = NET_QUIC_TICKET_LIFETIME;
-    tls->ptls_ctx.max_early_data_size = 0;
+    tls->ptls_ctx.max_early_data_size =
+        accept_early_data ? UINT32_MAX : 0;
 
     if (ptls_load_certificates(&tls->ptls_ctx, cert_file) != 0) {
         return "unable to load Picotls server certificate";

@@ -591,6 +591,43 @@ Server certificate and key files are loaded when the server Endpoint is
 created. Accepted Connections reuse the shared server TLS credential context;
 the files are not reopened for every Connection.
 
+## QUIC versions
+
+Net::QUIC supports QUIC v1 and QUIC v2.
+
+Clients use v1 by default. To start directly with v2:
+
+```perl
+my $driver = Net::QUIC::Driver->client(
+    ...
+    version => 2,
+);
+```
+
+Servers can prefer v2 while remaining compatible with v1 clients:
+
+```perl
+my $driver = Net::QUIC::Driver->server(
+    ...
+    preferred_version => 2,
+);
+```
+
+Both sides advertise v1 and v2 through Compatible Version Negotiation. A
+default v1 client can therefore move to v2 during the same handshake when the
+server prefers it.
+
+The distinction is observable:
+
+```perl
+$connection->client_chosen_version;  # first Initial: 1 or 2
+$connection->version;                # negotiated result: 1 or 2
+```
+
+Session tickets, NEW_TOKEN address tokens, and 0-RTT state are version-specific.
+Their public values remain opaque; Net::QUIC remembers the version inside them
+and automatically uses the correct version on the next connection.
+
 ## TLS session resumption
 
 A client Connection can return an opaque TLS session ticket:
@@ -842,8 +879,7 @@ Net::QUIC is the transport layer.
 
 HTTP/3 belongs in a separate distribution above it.
 
-The first transport release does not need to include later QUIC features such
-as:
+The remaining later QUIC features include:
 
 ```text
 QUIC DATAGRAM

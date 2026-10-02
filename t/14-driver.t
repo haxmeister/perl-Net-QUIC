@@ -172,6 +172,14 @@ my $fake = T::Driver::Endpoint->new;
 my @sent;
 my @scheduled;
 
+my $plain_datagram =
+    Net::QUIC::Datagram->_new('plain', $local, $peer);
+my $ecn_datagram =
+    Net::QUIC::Datagram->_new('marked', $local, $peer, 2);
+
+is($plain_datagram->ecn, 0, 'Datagram defaults to Not-ECT');
+is($ecn_datagram->ecn, 2, 'Datagram exposes supplied ECN codepoint');
+
 push @{$fake->{out}}, Net::QUIC::Datagram->_new('first', $local, $peer);
 push @{$fake->{out}}, Net::QUIC::Datagram->_new('second', $local, $peer);
 $fake->{timeout_after} = 0.25;
@@ -223,6 +231,17 @@ is(
     'receive forwards one UDP datagram to the endpoint',
 );
 is($scheduled[-1], 0.5, 'receive replaces the requested QUIC timeout');
+
+$driver->receive('incoming-ecn', $local, $peer, 3);
+
+is(
+    $fake->{received},
+    [
+        ['incoming', $local, $peer],
+        ['incoming-ecn', $local, $peer, 3],
+    ],
+    'receive forwards ECN metadata only when supplied',
+);
 
 $fake->{timeout_after} = undef;
 $driver->timeout;

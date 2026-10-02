@@ -760,6 +760,8 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         callbacks.get_new_connection_id2 = net_quic_get_new_connection_id_cb;
         callbacks.remove_connection_id = net_quic_remove_connection_id_cb;
         callbacks.get_path_challenge_data2 = ngtcp2_crypto_get_path_challenge_data2_cb;
+        callbacks.begin_path_validation = net_quic_begin_path_validation_cb;
+        callbacks.path_validation = net_quic_path_validation_cb;
 
         ngtcp2_cid_init(&dcid, vcid.scid, vcid.scidlen);
 

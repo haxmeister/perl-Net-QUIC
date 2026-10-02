@@ -4,11 +4,15 @@
 
 Current branch:
 
-main
+feature/tls-session-resumption
 
 Current main baseline:
 
-5b6825ac983af7d9279277d216cb2af392522f85
+fc266928880a6ffa0519954dfc5bc2980131d922
+
+Active draft PR:
+
+- PR #15, "Add TLS session resumption"
 
 PR #5, "Add generic event-loop integration driver", is merged.
 
@@ -60,16 +64,16 @@ engineering projects.
 
 Recommended implementation order:
 
-1. Finish directional stream abort semantics.
-   - Expose RESET_STREAM and STOP_SENDING as independent operations.
-   - Preserve clear local/remote error-code reporting for both directions.
-   - Decide whether the existing combined Stream->reset operation remains as a
-     convenience operation or is deprecated in favor of the directional API.
-   - Do this first because it is bounded, independent work and finishes the
-     base Stream state machine before early-data and migration work add more
-     connection states.
+1. Directional stream abort semantics. COMPLETE.
+   - Merged in PR #14.
+   - Main merge commit: fc266928880a6ffa0519954dfc5bc2980131d922.
+   - RESET_STREAM and STOP_SENDING are independent operations.
+   - Local and remote error-code state is exposed separately.
+   - Final CI matrix: 15/15 PASS.
 
-2. Add TLS session resumption.
+2. Add TLS session resumption. IN PROGRESS.
+   - Active branch: feature/tls-session-resumption.
+   - Active draft PR: #15.
    - Save TLS session tickets and enough associated QUIC transport state to
      establish a resumed connection safely.
    - Define how applications opt into or provide resumable session state without

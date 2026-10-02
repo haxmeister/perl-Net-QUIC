@@ -408,7 +408,7 @@ DESTROY(self)
 MODULE = Net::QUIC    PACKAGE = Net::QUIC::Connection
 
 SV *
-_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef, address_token_sv = &PL_sv_undef, version = 1)
+_client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, transport_sv = &PL_sv_undef, session_ticket_sv = &PL_sv_undef, early_transport_sv = &PL_sv_undef, address_token_sv = &PL_sv_undef, version = 1, version_locked = 0)
     const char *class
     SV *local_sv
     SV *peer_sv
@@ -420,6 +420,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
     SV *early_transport_sv
     SV *address_token_sv
     int version
+    int version_locked
     PREINIT:
         net_quic_connection *ep = NULL;
         const char *local;
@@ -590,9 +591,9 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
             : NGTCP2_PROTO_VER_V1;
 
         settings.preferred_versions = versions;
-        settings.preferred_versionslen = 2;
+        settings.preferred_versionslen = version_locked ? 1 : 2;
         settings.available_versions = versions;
-        settings.available_versionslen = 2;
+        settings.available_versionslen = version_locked ? 1 : 2;
         settings.original_version = chosen_version;
 
         if (address_token != NULL) {

@@ -1205,6 +1205,10 @@ _stream_reset(self, stream_id_iv, app_error_code_uv)
             croak("unknown QUIC stream");
         }
 
+        if (stream->local_reset || stream->remote_stop_sending || stream->closed) {
+            XSRETURN_EMPTY;
+        }
+
         rv = ngtcp2_conn_shutdown_stream_write(
             ep->conn,
             0,
@@ -1235,6 +1239,10 @@ _stream_stop_sending(self, stream_id_iv, app_error_code_uv)
         stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
         if (stream == NULL) {
             croak("unknown QUIC stream");
+        }
+
+        if (stream->local_stop_sending || stream->closed) {
+            XSRETURN_EMPTY;
         }
 
         rv = ngtcp2_conn_shutdown_stream_read(

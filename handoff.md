@@ -8,7 +8,7 @@ main
 
 Current implementation baseline:
 
-bb19e523e49493e78d672ab33897bb8d70773a27
+a164174c4f31538e29ab899c5cded6bc54804043
 
 PR #5, "Add generic event-loop integration driver", is merged.
 
@@ -27,7 +27,7 @@ Net::QUIC::Driver is now the recommended event-loop adapter boundary.
 Recommended adapter contract:
 
     $driver->start;
-    $driver->receive($bytes, $local, $peer);
+    $driver->receive($bytes, $local, $peer, $ecn);  # $ecn is optional
     $driver->timeout;
     $driver->writable;
 
@@ -114,7 +114,7 @@ Recommended implementation order:
    - BSD/macOS sockaddr length normalization is handled explicitly.
    - Final code checkpoint CI: 15/15 PASS.
 
-5. Finish the remaining version/path network features. IN PROGRESS.
+5. Finish the remaining version/path network features. COMPLETE.
    - NEW_TOKEN support for future-connection address validation is complete in
      PR #18:
        * Connection->address_token exposes the newest opaque token.
@@ -137,11 +137,24 @@ Recommended implementation order:
        * no duplicate PMTU subsystem or Driver API was added.
        * merge commit: bb19e523e49493e78d672ab33897bb8d70773a27.
        * final CI matrix: 15/15 PASS.
-   - ECN receive/transmit plumbing and validation state.
-   - Complete QUIC v2 client selection and compatible version negotiation.
-   - These belong last because PMTU and ECN should build on the finished path
-     model, while version-selection work is comparatively self-contained and
-     can be completed without disturbing the earlier APIs.
+   - QUIC v2 / Compatible Version Negotiation is complete in PR #20:
+       * clients support version => 1|2 with v1 remaining the default.
+       * servers support preferred_version => 1|2.
+       * RFC 9368 compatible v1-to-v2 negotiation is supported.
+       * Connection->version and client_chosen_version expose both versions.
+       * saved TLS, address-token, and early-data state is version-bound.
+       * merge commit: 074d551312a517fa8afb6dd89f763f3c4c0aa811.
+       * final CI matrix: 15/15 PASS.
+   - ECN is complete in PR #21:
+       * Datagram->ecn exposes the outgoing two-bit IP-header ECN codepoint.
+       * Endpoint->receive_datagram and Driver->receive accept optional received
+         ECN metadata while preserving the old three-argument call form.
+       * received markings are passed to ngtcp2 so ACK ECN counts work.
+       * ngtcp2 owns per-path ECN testing, validation, congestion response, and
+         fallback to Not-ECT when markings are stripped or not reported.
+       * connection-close datagrams preserve ngtcp2's requested ECN mark.
+       * merge commit: a164174c4f31538e29ab899c5cded6bc54804043.
+       * final CI matrix: 15/15 PASS.
 
 Dependency summary:
 
@@ -162,7 +175,7 @@ The practical sequence is therefore:
         -> Session resumption                     COMPLETE
         -> 0-RTT                                  COMPLETE
         -> Migration/path management              COMPLETE
-        -> NEW_TOKEN + PMTU + ECN + complete version negotiation   NEXT
+        -> NEW_TOKEN + PMTU + ECN + complete version negotiation   COMPLETE
 
 This order deliberately keeps the tightly coupled TLS work together, completes
 the Stream API before adding more connection states, and ensures path-dependent

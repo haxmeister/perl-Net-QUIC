@@ -312,10 +312,64 @@ sub establish {
     ok($resumed_server,
         'valid v2 address token avoids Retry on the resumed connection');
 
+    my %client_for_peer = (
+        $local_a => $client,
+        pack_sockaddr_in(40407, inet_aton('127.0.0.1')) => $resumed,
+    );
+
     for (1 .. 1000) {
         last if $resumed->connection->ready
             && $resumed_server->ready;
-        pump_pair($resumed, $server);
+
+        my $progress = 0;
+
+        while (my $datagram = $server->next_datagram) {
+            ++$progress;
+            my $target = $client_for_peer{$datagram->peer};
+            next if !defined $target;
+
+            $target->receive_datagram(
+                $datagram->data,
+                $datagram->peer,
+                $datagram->local,
+            );
+        }
+
+        for my $target ($client, $resumed) {
+            while (my $datagram = $target->next_datagram) {
+                ++$progress;
+                $server->receive_datagram(
+                    $datagram->data,
+                    $datagram->peer,
+                    $datagram->local,
+                );
+            }
+        }
+
+        my @wait;
+        my $server_after = $server->timeout_after;
+        if (defined($server_after) && $server_after <= 0) {
+            ++$progress;
+            $server->handle_timeout;
+        } elsif (defined($server_after) && $server_after > 0) {
+            push @wait, $server_after;
+        }
+
+        for my $target ($client, $resumed) {
+            my $after = $target->timeout_after;
+            if (defined($after) && $after <= 0) {
+                ++$progress;
+                $target->handle_timeout;
+            } elsif (defined($after) && $after > 0) {
+                push @wait, $after;
+            }
+        }
+
+        if (!$progress && @wait) {
+            @wait = sort { $a <=> $b } @wait;
+            my $nap = $wait[0] > 0.01 ? 0.01 : $wait[0] + 0.001;
+            sleep($nap);
+        }
     }
 
     ok($resumed->connection->ready, 'version-locked resumed client is ready');

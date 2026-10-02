@@ -144,6 +144,22 @@ kernel cannot immediately accept a UDP packet, the adapter retains that packet,
 reports backpressure to Driver, and later calls `writable` after the queue
 drains.
 
+These small examples intentionally use ordinary `recv` and `send`, so they do
+not demonstrate ECN ancillary-data handling.
+
+That is still a valid Net::QUIC integration. If an adapter does not pass ECN
+metadata, ngtcp2 simply treats ECN as unavailable for that path.
+
+A production ECN-aware adapter can use the event loop or platform equivalent of
+`recvmsg` / `sendmsg` to:
+
+- read the two ECN bits from each received IP packet and pass them as the
+  optional fourth argument to `$driver->receive(...)`
+- apply `$datagram->ecn` to the outgoing IP header before sending
+
+The exact ancillary-data API remains the responsibility of the UDP/event-loop
+adapter rather than Net::QUIC itself.
+
 ## Linux::Event
 
 The Linux::Event example is shorter because

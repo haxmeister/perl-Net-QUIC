@@ -126,6 +126,7 @@ net_quic_start_error_close(
         }
 
         ep->closebuflen = (size_t)nwrite;
+        ep->close_ecn = pi.ecn & NGTCP2_ECN_MASK;
         ep->closebuf_pending = 1;
     }
 
@@ -1630,7 +1631,8 @@ _next_datagram(self)
                 ep->txbuf,
                 ep->closebuflen,
                 &close_local,
-                &close_peer
+                &close_peer,
+                ep->close_ecn
             );
             goto next_datagram_done;
         }
@@ -1738,7 +1740,8 @@ _next_datagram(self)
                 ep->txbuf,
                 (size_t)nwrite,
                 &ps.path.local,
-                &ps.path.remote
+                &ps.path.remote,
+                pi.ecn
             );
         }
 
@@ -1749,11 +1752,12 @@ _next_datagram(self)
         RETVAL
 
 void
-_receive_datagram(self, data_sv, local_sv, peer_sv)
+_receive_datagram(self, data_sv, local_sv, peer_sv, ecn_uv = 0)
     SV *self
     SV *data_sv
     SV *local_sv
     SV *peer_sv
+    UV ecn_uv
     PREINIT:
         net_quic_connection *ep;
         const char *data;
@@ -1785,12 +1789,17 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
             croak("local and peer must be packed IPv4 or IPv6 socket addresses");
         }
 
+        if (ecn_uv > NGTCP2_ECN_CE) {
+            croak("ECN codepoint must be an integer from 0 through 3");
+        }
+
         memset(&path, 0, sizeof(path));
         path.local.addr = &local_addr.sa;
         path.local.addrlen = local_addrlen;
         path.remote.addr = &peer_addr.sa;
         path.remote.addrlen = peer_addrlen;
         memset(&pi, 0, sizeof(pi));
+        pi.ecn = (uint8_t)ecn_uv;
 
         now = net_quic_now();
         rv = ngtcp2_conn_read_pkt(
@@ -2027,6 +2036,7 @@ _close(self, app_error_code_uv = 0)
             }
 
             ep->closebuflen = (size_t)nwrite;
+            ep->close_ecn = pi.ecn & NGTCP2_ECN_MASK;
             ep->closebuf_pending = 1;
         }
 

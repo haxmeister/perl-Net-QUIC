@@ -472,6 +472,7 @@ _client_new(class, local_sv, peer_sv, alpn_sv, server_name_sv, ca_file_sv, trans
         callbacks.stream_open = net_quic_stream_open_cb;
         callbacks.stream_close = net_quic_stream_close_limit_cb;
         callbacks.stream_reset = net_quic_stream_reset_cb;
+        callbacks.recv_stop_sending = net_quic_recv_stop_sending_cb;
         callbacks.extend_max_local_streams_bidi =
             net_quic_extend_max_local_streams_bidi_cb;
         callbacks.extend_max_local_streams_uni =
@@ -686,6 +687,7 @@ _server_new(class, initial_sv, local_sv, peer_sv, alpn_sv, server_tls_sv, odcid_
         callbacks.stream_open = net_quic_stream_open_cb;
         callbacks.stream_close = net_quic_stream_close_limit_cb;
         callbacks.stream_reset = net_quic_stream_reset_cb;
+        callbacks.recv_stop_sending = net_quic_recv_stop_sending_cb;
         callbacks.extend_max_local_streams_bidi =
             net_quic_extend_max_local_streams_bidi_cb;
         callbacks.extend_max_local_streams_uni =
@@ -1143,6 +1145,50 @@ _stream_local_reset_code(self, stream_id_iv)
     OUTPUT:
         RETVAL
 
+SV *
+_stream_remote_stop_sending_code(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (!stream->remote_stop_sending) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVuv((UV)stream->remote_stop_sending_code);
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+_stream_local_stop_sending_code(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (!stream->local_stop_sending) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVuv((UV)stream->local_stop_sending_code);
+        }
+    OUTPUT:
+        RETVAL
+
 void
 _stream_reset(self, stream_id_iv, app_error_code_uv)
     SV *self
@@ -1159,19 +1205,55 @@ _stream_reset(self, stream_id_iv, app_error_code_uv)
             croak("unknown QUIC stream");
         }
 
-        rv = ngtcp2_conn_shutdown_stream(
+        rv = ngtcp2_conn_shutdown_stream_write(
             ep->conn,
             0,
             stream->id,
             (uint64_t)app_error_code_uv
         );
         if (rv != 0) {
-            croak("unable to reset QUIC stream: %s", ngtcp2_strerror(rv));
+            croak("unable to reset QUIC stream send side: %s", ngtcp2_strerror(rv));
         }
 
         stream->local_reset = 1;
         stream->local_reset_code = (uint64_t)app_error_code_uv;
         stream->write_shutdown = 1;
+        net_quic_stream_free_tx(aTHX_ stream);
+        net_quic_stream_reclaim_closed(aTHX_ ep);
+
+void
+_stream_stop_sending(self, stream_id_iv, app_error_code_uv)
+    SV *self
+    IV stream_id_iv
+    UV app_error_code_uv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        rv = ngtcp2_conn_shutdown_stream_read(
+            ep->conn,
+            0,
+            stream->id,
+            (uint64_t)app_error_code_uv
+        );
+        if (rv != 0) {
+            croak(
+                "unable to stop receiving QUIC stream: %s",
+                ngtcp2_strerror(rv)
+            );
+        }
+
+        stream->local_stop_sending = 1;
+        stream->local_stop_sending_code = (uint64_t)app_error_code_uv;
+        stream->read_shutdown = 1;
+        net_quic_stream_discard_rx(aTHX_ ep, stream);
         net_quic_stream_reclaim_closed(aTHX_ ep);
 
 void

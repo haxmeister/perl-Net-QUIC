@@ -104,6 +104,10 @@ sub client {
         : '';
 
     my $transport = $class->_transport_config(delete $args{transport});
+    my $session_ticket = delete $args{session_ticket};
+
+    croak "session_ticket cannot be empty"
+        if defined($session_ticket) && $session_ticket eq '';
 
     my $connection = Net::QUIC::Connection->_client_new(
         $args{local},
@@ -112,6 +116,7 @@ sub client {
         $args{server_name},
         $ca_file,
         $transport,
+        $session_ticket,
     );
 
     return bless {

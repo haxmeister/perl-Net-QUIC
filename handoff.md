@@ -4,15 +4,11 @@
 
 Current branch:
 
-feature/tls-session-resumption
+main
 
 Current main baseline:
 
-fc266928880a6ffa0519954dfc5bc2980131d922
-
-Active draft PR:
-
-- PR #15, "Add TLS session resumption"
+60a769f5a266ad53c80805fd2f54648789927e82
 
 PR #5, "Add generic event-loop integration driver", is merged.
 
@@ -71,14 +67,18 @@ Recommended implementation order:
    - Local and remote error-code state is exposed separately.
    - Final CI matrix: 15/15 PASS.
 
-2. Add TLS session resumption. IN PROGRESS.
-   - Active branch: feature/tls-session-resumption.
-   - Active draft PR: #15.
-   - Save TLS session tickets and enough associated QUIC transport state to
-     establish a resumed connection safely.
-   - Define how applications opt into or provide resumable session state without
-     making the event-loop adapter responsible for TLS policy.
-   - Resumption must be complete and independently useful before 0-RTT is added.
+2. TLS session resumption. COMPLETE.
+   - Merged in PR #15.
+   - Main merge commit: 60a769f5a266ad53c80805fd2f54648789927e82.
+   - Clients can retrieve an opaque session ticket with
+     Connection->session_ticket and pass it back as session_ticket on a later
+     client connection.
+   - Connection->resumed reports whether the TLS handshake actually resumed.
+   - Server tickets are protected with a per-server-context AES-256-GCM key.
+   - Invalid, expired, or stale tickets fall back to a full handshake.
+   - Tickets are bound to accepted SNI and negotiated ALPN by Picotls.
+   - 0-RTT remains disabled and is deliberately separate.
+   - Hardened code checkpoint CI: 15/15 PASS.
 
 3. Add 0-RTT / early data.
    - Build directly on the session-resumption state from project 2.
@@ -122,9 +122,9 @@ Dependency summary:
 
 The practical sequence is therefore:
 
-    Stream abort semantics
-        -> Session resumption
-        -> 0-RTT
+    Stream abort semantics                         COMPLETE
+        -> Session resumption                     COMPLETE
+        -> 0-RTT                                  NEXT
         -> Migration/path management
         -> NEW_TOKEN + PMTU + ECN + complete version negotiation
 

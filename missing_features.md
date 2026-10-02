@@ -76,17 +76,6 @@ mutual TLS authentication.
 
 ## Base QUIC operations not yet exposed cleanly
 
-### Independent RESET_STREAM and STOP_SENDING
-
-The public Stream API currently provides a combined reset operation.
-
-QUIC has two independent directional operations:
-
-- RESET_STREAM aborts the local sending side
-- STOP_SENDING asks the peer to stop its sending side
-
-Net::QUIC should eventually expose these independently.
-
 ### Application PING / keepalive
 
 Net::QUIC does not expose an application-level way to request a QUIC PING or a
@@ -171,13 +160,12 @@ The largest remaining feature groups are:
 1. TLS session resumption
 2. 0-RTT / early data
 3. active migration and path management
-4. independent RESET_STREAM and STOP_SENDING operations
-5. QUIC DATAGRAM
-6. preferred address and NEW_TOKEN
-7. PMTU discovery
-8. ECN
-9. complete QUIC v2 / compatible version negotiation
-10. qlog and advanced congestion-control configuration
+4. QUIC DATAGRAM
+5. preferred address and NEW_TOKEN
+6. PMTU discovery
+7. ECN
+8. complete QUIC v2 / compatible version negotiation
+9. qlog and advanced congestion-control configuration
 
 ## Already implemented
 
@@ -196,7 +184,8 @@ The following should not be treated as missing:
 - stream-credit replenishment
 - connection-level and stream-level flow control
 - FIN
-- stream reset
+- independent RESET_STREAM and STOP_SENDING operations
+- directional stream abort error-code reporting
 - connection close
 - closing and draining periods
 - idle timeout

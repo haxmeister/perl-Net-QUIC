@@ -1,5 +1,12 @@
 Revision history for Net-QUIC
 
+Unreleased
+    - Split stream aborts into independent RESET_STREAM and STOP_SENDING operations.
+    - Make Stream->reset abort only the local send side, matching its documented behavior.
+    - Add Stream->stop_sending for aborting the local receive side.
+    - Expose local and peer STOP_SENDING application error codes.
+    - Preserve the opposite direction of bidirectional streams after either directional abort.
+
 0.01  2026-09-29
     - First stable CPAN release.
     - Add a real localhost UDP Driver loopback test using kernel UDP sockets.

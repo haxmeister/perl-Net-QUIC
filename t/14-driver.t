@@ -119,6 +119,11 @@ use Net::QUIC::Stream;
         $self->{reset} = [$id, $code];
         return;
     }
+    sub _stream_stop_sending {
+        my ($self, $id, $code) = @_;
+        $self->{stop_sending} = [$id, $code];
+        return;
+    }
     sub _notify_output {
         my ($self) = @_;
         $self->{notified}++;
@@ -151,6 +156,10 @@ is($stream_connection->{notified}, 3,
 $stream->reset(9);
 is($stream_connection->{notified}, 4,
     'Stream reset notifies integration output');
+
+$stream->stop_sending(10);
+is($stream_connection->{notified}, 5,
+    'Stream stop_sending notifies integration output');
 
 undef $stream;
 is($stream_connection->{released}, 1,

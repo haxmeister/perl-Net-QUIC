@@ -23,6 +23,9 @@ my $server = Net::QUIC::Endpoint->server(
     validate_address => 1,
 );
 
+my %client_for_local;
+my @clients;
+
 sub make_client {
     my ($local, $token) = @_;
 
@@ -36,53 +39,72 @@ sub make_client {
 
     $args{address_token} = $token if defined $token;
 
-    return Net::QUIC::Endpoint->client(%args);
+    my $client = Net::QUIC::Endpoint->client(%args);
+    $client_for_local{$local} = $client;
+    push @clients, $client;
+
+    return $client;
 }
 
-sub pump_pair {
-    my ($client) = @_;
+sub route_server_datagram {
+    my ($datagram) = @_;
+    my $client = $client_for_local{$datagram->peer};
+
+    return if !defined $client;
+
+    $client->receive_datagram(
+        $datagram->data,
+        $datagram->peer,
+        $datagram->local,
+    );
+
+    return 1;
+}
+
+sub pump_network {
     my $progress = 0;
 
     while (my $datagram = $server->next_datagram) {
         ++$progress;
-        $client->receive_datagram(
-            $datagram->data,
-            $datagram->peer,
-            $datagram->local,
-        ) if $datagram->peer eq $client->connection->path->{local};
+        route_server_datagram($datagram);
     }
 
-    while (my $datagram = $client->next_datagram) {
-        ++$progress;
-        $server->receive_datagram(
-            $datagram->data,
-            $datagram->peer,
-            $datagram->local,
-        );
+    for my $client (@clients) {
+        while (my $datagram = $client->next_datagram) {
+            ++$progress;
+            $server->receive_datagram(
+                $datagram->data,
+                $datagram->peer,
+                $datagram->local,
+            );
+        }
     }
+
+    my @wait;
 
     my $server_after = $server->timeout_after;
     if (defined($server_after) && $server_after <= 0) {
         ++$progress;
         $server->handle_timeout;
+    } elsif (defined($server_after) && $server_after > 0) {
+        push @wait, $server_after;
     }
 
-    my $client_after = $client->timeout_after;
-    if (defined($client_after) && $client_after <= 0) {
-        ++$progress;
-        $client->handle_timeout;
-    }
-
-    if (!$progress) {
-        my @wait = sort { $a <=> $b }
-            grep { defined($_) && $_ > 0 }
-            ($server_after, $client_after);
-
-        if (@wait) {
-            my $nap = $wait[0] > 0.01 ? 0.01 : $wait[0] + 0.001;
-            sleep($nap);
+    for my $client (@clients) {
+        my $after = $client->timeout_after;
+        if (defined($after) && $after <= 0) {
             ++$progress;
+            $client->handle_timeout;
+        } elsif (defined($after) && $after > 0) {
+            push @wait, $after;
         }
+    }
+
+    if (!$progress && @wait) {
+        @wait = sort { $a <=> $b } @wait;
+        my $nap = $wait[0] > 0.01 ? 0.01 : $wait[0] + 0.001;
+        sleep($nap);
+        ++$progress;
     }
 
     return $progress;
@@ -95,6 +117,7 @@ sub take_server_datagram_for {
         my $datagram = $server->next_datagram;
         return if !defined $datagram;
         return $datagram if $datagram->peer eq $peer;
+        route_server_datagram($datagram);
     }
 
     return;
@@ -138,7 +161,7 @@ my $first_server = $server->next_connection;
 ok(defined($first_server), 'Retry-validated first connection is accepted');
 
 for (1 .. 800) {
-    pump_pair($first);
+    pump_network();
     last if $first->connection->ready
         && $first_server->ready
         && defined($first->connection->address_token);
@@ -168,7 +191,7 @@ ok(
 );
 
 for (1 .. 800) {
-    pump_pair($second);
+    pump_network();
     last if $second->connection->ready
         && $second_server->ready
         && defined($second->connection->address_token);
@@ -227,7 +250,7 @@ ok(
 );
 
 for (1 .. 800) {
-    pump_pair($wrong);
+    pump_network();
     last if $wrong->connection->ready && $wrong_server->ready;
 }
 

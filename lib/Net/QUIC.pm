@@ -134,14 +134,14 @@ Conceptually:
     UDP packet received
         -> $driver->receive($bytes, $local, $peer, $ecn)
 
-The C<$ecn> argument is optional. Adapters that cannot read ECN metadata can
-continue to use the original three-argument form.
-
     requested QUIC timeout fired
         -> $driver->timeout
 
     UDP output recovered from backpressure
         -> $driver->writable
+
+The C<$ecn> argument is optional. Adapters that cannot read ECN metadata can
+continue to use the original three-argument form.
 
 Driver owns output draining, backpressure pause/resume state, and timeout
 replacement.

@@ -796,6 +796,10 @@ net_quic_recv_stream_data_cb(
         return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
+    if ((flags & NGTCP2_STREAM_DATA_FLAG_0RTT) != 0) {
+        stream->early_data = 1;
+    }
+
     if (datalen == 0 && (flags & NGTCP2_STREAM_DATA_FLAG_FIN) == 0) {
         return 0;
     }

@@ -31,8 +31,8 @@ Net::QUIC handles the difficult transport work:
 
 Your event loop still owns the UDP socket.
 
-You do not need to know ngtcp2 to use Net::QUIC. Net::QUIC uses ngtcp2
-internally as its native QUIC engine.
+You do not need to know ngtcp2 to use Net::QUIC. It is an internal native
+dependency.
 
 Net::QUIC is not HTTP/3 and is not a web framework. It gives applications
 connections and byte streams. Your application decides what the bytes mean.
@@ -284,7 +284,7 @@ Net::QUIC deliberately does not choose an event loop.
 
 The event loop owns:
 
-- the UDP socket
+- UDP I/O
 - one replaceable one-shot timer
 
 Driver needs two callbacks from the adapter:
@@ -745,7 +745,7 @@ address.
 
 Different network paths can safely carry different UDP packet sizes.
 
-Net::QUIC lets ngtcp2 discover a useful packet size for the current path.
+Net::QUIC automatically discovers a useful packet size for the current path.
 
 For diagnostics:
 
@@ -791,8 +791,8 @@ The wire values are:
 If the adapter does not provide ECN metadata, the normal three-argument
 `receive` form remains valid.
 
-Net::QUIC's native engine tests whether ECN works correctly on the path and
-automatically stops using it when necessary.
+Net::QUIC tests whether ECN works correctly on the path and automatically
+stops using it when necessary.
 
 ## Lower-level Endpoint API
 

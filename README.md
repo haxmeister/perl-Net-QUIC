@@ -200,7 +200,7 @@ packed address to:
 $driver->receive($bytes, $local, $peer, $ecn);
 ```
 
-The C<$ecn> value is optional when the adapter cannot read ECN metadata.
+The `$ecn` value is optional when the adapter cannot read ECN metadata.
 
 The adapter must also send each outbound Datagram using the local source address
 reported by:

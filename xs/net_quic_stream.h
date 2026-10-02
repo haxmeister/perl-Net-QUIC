@@ -959,8 +959,6 @@ net_quic_recv_stop_sending_cb(
 
     stream->remote_stop_sending = 1;
     stream->remote_stop_sending_code = app_error_code;
-    stream->local_reset = 1;
-    stream->local_reset_code = app_error_code;
     stream->write_shutdown = 1;
     stream->tx_discard_pending = 1;
 

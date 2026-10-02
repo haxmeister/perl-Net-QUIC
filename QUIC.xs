@@ -2743,6 +2743,7 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
         ngtcp2_cid reset_cid;
         ngtcp2_stateless_reset_token reset_token;
         uint8_t token[NGTCP2_CRYPTO_MAX_RETRY_TOKENLEN2];
+        uint8_t regular_token_secret[NET_QUIC_SERVER_SECRET_LEN];
         uint8_t response[NGTCP2_MAX_UDP_PAYLOAD_SIZE];
         uint8_t reset_random[NET_QUIC_STATELESS_RESET_MAX_RANDLEN];
         uint8_t unused_random;
@@ -2999,15 +3000,28 @@ _server_front_door(class, data_sv, peer_sv, secret_sv, validate_address)
                 ) {
                     now = net_quic_system_now();
 
+                    if (net_quic_new_token_secret(
+                            regular_token_secret,
+                            (const uint8_t *)secret,
+                            hd.version
+                        ) != 0) {
+                        croak("unable to derive NEW_TOKEN version secret");
+                    }
+
                     rv = ngtcp2_crypto_verify_regular_token(
                         hd.token,
                         hd.tokenlen,
-                        (const uint8_t *)secret,
-                        (size_t)secretlen,
+                        regular_token_secret,
+                        sizeof(regular_token_secret),
                         &peer_addr.sa,
                         peer_addrlen,
                         NET_QUIC_NEW_TOKEN_TIMEOUT,
                         now
+                    );
+
+                    ptls_clear_memory(
+                        regular_token_secret,
+                        sizeof(regular_token_secret)
                     );
 
                     if (rv == 0) {

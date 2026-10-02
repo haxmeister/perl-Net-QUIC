@@ -372,8 +372,10 @@ unambiguous.
 Returns the application error code when the peer sent STOP_SENDING for this
 endpoint's send side, or undef if no such request has been received.
 
-Receiving STOP_SENDING causes QUIC to abort this endpoint's send side with the
-same application error code.
+Receiving STOP_SENDING closes this endpoint's send side. QUIC sends a
+RESET_STREAM with the same application error code when the send side still
+requires an abort; no RESET_STREAM is needed after a completed send has already
+been fully acknowledged.
 
 =head2 local_stop_sending_code
 

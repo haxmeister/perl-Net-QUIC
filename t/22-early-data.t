@@ -187,6 +187,10 @@ isa_ok(
     ['Net::QUIC::Stream'],
     'server sees the 0-RTT stream before handshake completion',
 );
+ok(
+    $server_early_stream->early_data,
+    'server stream retains its 0-RTT origin',
+);
 is(
     $server_early_stream->next_data,
     "zero-rtt\n",
@@ -278,17 +282,27 @@ is(
 $retry_stream->send("after-rejection\n");
 $retry_stream->finish;
 
+my $retry_incoming;
 for (1 .. 500) {
     pump_pair($third_client, $third_server, $third_local);
-    my $incoming = $third_server->next_stream;
-    if ($incoming) {
-        is(
-            $incoming->next_data,
-            "after-rejection\n",
-            'application can resend on a new stream after rejection',
-        );
-        last;
+    $retry_incoming ||= $third_server->next_stream;
+    last if $retry_incoming;
+}
+
+ok(defined($retry_incoming), 'server sees replacement stream after rejection');
+if ($retry_incoming) {
+    my $bytes;
+    for (1 .. 500) {
+        $bytes = $retry_incoming->next_data;
+        last if defined $bytes;
+        pump_pair($third_client, $third_server, $third_local);
     }
+
+    is(
+        $bytes,
+        "after-rejection\n",
+        'application can resend on a new stream after rejection',
+    );
 }
 
 like(

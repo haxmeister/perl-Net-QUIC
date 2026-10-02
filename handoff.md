@@ -8,7 +8,7 @@ main
 
 Current main baseline:
 
-46ef9dba2f7942f9703654aba6c9327b4f1900ca
+5b6825ac983af7d9279277d216cb2af392522f85
 
 PR #5, "Add generic event-loop integration driver", is merged.
 
@@ -52,68 +52,90 @@ No event-loop-specific adapter is part of the distribution. Linux::Event,
 IO::Async, AnyEvent, EV, Mojolicious, and other event systems can integrate
 above Driver without changing Net::QUIC core.
 
-## Next completeness work
+## Core QUIC completeness roadmap
 
-Recommended sequence before treating the first public transport release as
-complete:
+Net::QUIC 0.01 has the basic QUIC transport in place. The remaining work that
+should be treated as core transport completeness is now grouped into five
+engineering projects.
 
-1. Add a real UDP loopback Driver test.
-   - Use actual localhost UDP sockets rather than only in-memory datagram
-     exchange.
-   - Prove client -> kernel UDP -> server handshake -> stream request ->
-     response through Net::QUIC::Driver.
+Recommended implementation order:
 
-2. Improve stream-limit semantics.
-   - Reaching the peer's temporary bidirectional or unidirectional stream limit
-     should not look like a broken connection.
-   - Decide the public behavior for "no stream available yet" and how the
-     application learns when another local stream may be opened.
+1. Finish directional stream abort semantics.
+   - Expose RESET_STREAM and STOP_SENDING as independent operations.
+   - Preserve clear local/remote error-code reporting for both directions.
+   - Decide whether the existing combined Stream->reset operation remains as a
+     convenience operation or is deprecated in favor of the directional API.
+   - Do this first because it is bounded, independent work and finishes the
+     base Stream state machine before early-data and migration work add more
+     connection states.
 
-3. Finish the public error model.
-   - Make transport errors, application close errors, TLS/handshake failures,
-     remote stream resets, local failures, and normal close behavior
-     intentionally distinguishable.
-   - Avoid a large exception hierarchy unless it provides real value.
+2. Add TLS session resumption.
+   - Save TLS session tickets and enough associated QUIC transport state to
+     establish a resumed connection safely.
+   - Define how applications opt into or provide resumable session state without
+     making the event-loop adapter responsible for TLS policy.
+   - Resumption must be complete and independently useful before 0-RTT is added.
 
-4. Review transport defaults and public tuning.
-   - Current implementation uses sensible fixed defaults for flow-control and
-     stream limits.
-   - Decide which, if any, belong in public constructors.
-   - Do not expose ngtcp2 knobs merely because they exist.
+3. Add 0-RTT / early data.
+   - Build directly on the session-resumption state from project 2.
+   - Permit application stream data before handshake completion only when the
+     saved TLS and QUIC state allows it.
+   - Handle rejection correctly and make the replay risk explicit to the
+     application API.
+   - Keep 0-RTT application policy above the event-loop-neutral Driver boundary.
 
-5. Add destructive lifecycle tests.
-   - Drop Driver, Endpoint, Connection, and Stream objects in different orders.
-   - Close while output is pending or backpressured.
-   - Exercise several server Connections closing at different times.
-   - Verify no stale CID routes, pending timers, or native stream state remain.
+4. Add active migration and full path management.
+   - Represent and validate alternative network paths.
+   - Support path probing, validation success/failure, path switching, and
+     active connection migration.
+   - Support server preferred-address behavior as part of this path work.
+   - Preserve the existing architecture in which the adapter owns UDP sockets
+     and Net::QUIC receives exact local/peer addresses.
+   - Complete this path layer before adding features whose state is naturally
+     per-path, especially PMTU and ECN.
 
-6. Do the final documentation/API cleanup.
-   - Rewrite README/POD around the final simple model:
-       Driver -> Endpoint -> Connection -> Stream
-   - Make client/server examples copyable and clear.
-   - Add a small adapter-writing section.
-   - Keep handoff.md out of the CPAN distribution.
+5. Finish the remaining version/path network features.
+   - NEW_TOKEN support for future-connection address validation.
+   - PMTU discovery and per-path packet-size state.
+   - ECN receive/transmit plumbing and validation state.
+   - Complete QUIC v2 client selection and compatible version negotiation.
+   - These belong last because PMTU and ECN should build on the finished path
+     model, while version-selection work is comparatively self-contained and
+     can be completed without disturbing the earlier APIs.
 
-7. Review exact local-address handling for wildcard-bound UDP sockets.
-   - Net::QUIC already accepts the correct neutral packed local sockaddr on
-     each received packet.
-   - Event-loop adapters bound to 0.0.0.0 or :: may eventually need packet-info
-     support such as IP_PKTINFO/IPV6_PKTINFO to report the exact destination
-     interface/address.
-   - This matters especially for multi-interface servers, migration, and more
-     advanced path handling.
+Dependency summary:
 
-Advanced QUIC features that do not need to block the first transport release:
+    directional stream aborts
+              |
+              +------------------------------+
+                                             |
+    session resumption -> 0-RTT              |
+                                             |
+    path management -> PMTU / ECN /          |
+                       preferred address      |
+                                             |
+    version negotiation / NEW_TOKEN ----------+
 
-- session resumption / 0-RTT
-- connection migration / path switching
-- unreliable QUIC DATAGRAM extension
-- qlog
-- ECN exposure
-- explicit PMTU controls
-- broad congestion-control or low-level transport tuning
+The practical sequence is therefore:
 
-Keep HTTP/3 outside Net::QUIC transport for now.
+    Stream abort semantics
+        -> Session resumption
+        -> 0-RTT
+        -> Migration/path management
+        -> NEW_TOKEN + PMTU + ECN + complete version negotiation
+
+This order deliberately keeps the tightly coupled TLS work together, completes
+the Stream API before adding more connection states, and ensures path-dependent
+network features are built on one final path abstraction instead of being
+retrofitted later.
+
+Important features that remain valuable but are not required to finish these
+five core projects include QUIC DATAGRAM, qlog, application-triggered key
+update, client-certificate authentication, application PING/keepalive controls,
+custom CID policy, QUIC-bit greasing controls, and advanced congestion-control
+selection/tuning.
+
+Keep HTTP/3 outside Net::QUIC transport.
 
 ## Branch cleanup status
 

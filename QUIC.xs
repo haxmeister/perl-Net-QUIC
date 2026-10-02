@@ -1542,6 +1542,13 @@ _receive_datagram(self, data_sv, local_sv, peer_sv)
             now
         );
 
+        /*
+         * recv_stop_sending runs inside ngtcp2_conn_read_pkt before ngtcp2
+         * clears its own references to queued stream data.  Release our
+         * transmit buffers only after the read call has returned.
+         */
+        net_quic_stream_apply_deferred_discards(aTHX_ ep);
+
         if (rv == NGTCP2_ERR_DRAINING || rv == NGTCP2_ERR_CLOSING) {
             net_quic_capture_peer_close(ep);
             net_quic_start_close_wait(ep, now);

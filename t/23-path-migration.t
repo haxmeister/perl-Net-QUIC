@@ -162,9 +162,13 @@ is($before, "before-migration\n", 'stream works before migration');
 
 $client->connection->migrate($client_b);
 
-my $started = $client->connection->path_validation_status;
-is(ref($started), 'HASH', 'migration exposes path-validation state');
-is($started->{status}, 'validating', 'new path starts validating');
+is(
+    $client->connection->path_validation_status,
+    'validating',
+    'new path starts validating',
+);
+my $started = $client->connection->path_validation;
+is(ref($started), 'HASH', 'migration exposes detailed path-validation state');
 is($started->{local}, $client_b, 'validation targets path B');
 is($started->{peer}, $server_local, 'validation keeps the same server peer');
 
@@ -183,18 +187,20 @@ for (1 .. 1000) {
 
     deliver_server_to_client($server, $client);
 
-    my $status = $client->connection->path_validation_status;
-    last if ref($status) eq 'HASH'
-        && $status->{status} eq 'succeeded';
+    last if $client->connection->path_validation_status eq 'succeeded';
 
     pump_pair($client, $server);
 }
 
 ok($saw_path_b_datagram, 'client emits path-validation traffic from path B');
 
-my $validated = $client->connection->path_validation_status;
+is(
+    $client->connection->path_validation_status,
+    'succeeded',
+    'path B validates successfully',
+);
+my $validated = $client->connection->path_validation;
 is(ref($validated), 'HASH', 'validation result remains observable');
-is($validated->{status}, 'succeeded', 'path B validates successfully');
 is($validated->{local}, $client_b, 'successful validation records path B');
 
 my $migrated_path = $client->connection->path;

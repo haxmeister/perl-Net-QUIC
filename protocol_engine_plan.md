@@ -53,9 +53,59 @@ protocol-engine use case needs acknowledged byte progress, so exposing an
 imprecise FIN acknowledgement flag would add risk without adding a required
 capability.
 
-Remaining validation work is performance measurement and deciding, from those
-measurements, whether a native zero-copy receive consumer or faster Stream-ID
-index is justified.
+Performance validation found that the original linked-list Stream lookup did
+not scale acceptably, while the advanced RX/TX interfaces were already fast
+enough to avoid a more invasive native-consumer redesign.
+
+A native Stream-ID hash index is therefore part of this implementation.
+
+## Performance validation
+
+Measured on GitHub Actions `ubuntu-latest` with Perl 5.44. These numbers are
+for regression and architectural comparison, not absolute hardware claims.
+
+Before the Stream-ID index:
+
+```text
+100 streams, last:   1,683,810 lookups/s
+1000 streams, last:    173,626 lookups/s
+5000 streams, last:     24,065 lookups/s
+```
+
+After the Stream-ID index:
+
+```text
+100 streams, last:   4,652,067 lookups/s
+1000 streams, last:  4,743,400 lookups/s
+5000 streams, last:  4,734,619 lookups/s
+```
+
+The 5000-Stream worst case improved by roughly 197x and lookup throughput is
+now effectively independent of Stream position.
+
+The post-index advanced data-path measurements were:
+
+```text
+send:                    826.16 MiB/s
+send_some:              1064.27 MiB/s
+next_data:               922.81 MiB/s
+next_data_chunk+consume: 672.72 MiB/s
+```
+
+Explicit receive is slower because it returns both bytes and FIN state and
+performs a separate explicit credit call. It still exceeded 670 MiB/s in this
+benchmark. That does not justify adding a native zero-copy receive consumer at
+this stage. Revisit only if a real upper-layer benchmark shows this copy/API
+cost is material.
+
+The repeatable benchmark is kept under:
+
+```text
+xt/benchmark/protocol_engine.pl
+```
+
+The GitHub benchmark workflow is manual-only so ordinary pushes do not spend
+CI time on performance measurement.
 
 ## Required advanced capabilities
 

@@ -1,9 +1,6 @@
 name: protocol-engine-benchmark
 
 on:
-  push:
-    branches:
-      - feature/protocol-engine-api
   workflow_dispatch:
 
 jobs:

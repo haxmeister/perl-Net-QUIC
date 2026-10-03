@@ -330,7 +330,7 @@ sub _server_receive_datagram {
 
         $connection->_receive_datagram($bytes, $local, $peer, $ecn);
         $connection->_dispatch_stream_activity;
-        $connection->_dispatch_stream_availability;
+    $connection->_dispatch_stream_availability;
 
         $self->{routes}{$initial_dcid} = $connection;
         push @{$self->{connections}}, $connection;

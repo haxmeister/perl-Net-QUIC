@@ -243,6 +243,30 @@ sub next_active_stream_id {
     return $id;
 }
 
+sub send_buffer_limit {
+    my ($self, @args) = @_;
+
+    return $self->_send_buffer_limit if !@args;
+
+    my $limit = $args[0];
+
+    if (!defined $limit) {
+        $self->_clear_send_buffer_limit;
+        return $self;
+    }
+
+    die "send buffer limit must be a non-negative integer"
+        if ref($limit) || $limit !~ /\A\d+\z/;
+
+    $self->_set_send_buffer_limit($limit);
+    return $self;
+}
+
+sub send_buffered_bytes {
+    my ($self) = @_;
+    return $self->_send_buffered_bytes;
+}
+
 sub open_bidi_stream {
     my ($self) = @_;
     my $id = $self->_open_stream(1);
@@ -625,6 +649,48 @@ Returns undef when the activity queue is empty.
 A protocol engine should normally drain this queue when L</on_stream_activity>
 wakes it. State such as received data, acknowledgement offsets, reset codes,
 and STOP_SENDING codes remains available on the corresponding Stream object.
+
+=head1 BOUNDED TRANSMIT BUFFERING
+
+These methods are for advanced producers that need a hard bound on Stream data
+retained by Net::QUIC.
+
+=head2 send_buffer_limit
+
+    $connection->send_buffer_limit(4 * 1024 * 1024);
+
+Enables a connection-wide limit on retained Stream transmit bytes.
+
+The limit counts Stream data that is queued for sending plus data already sent
+but still retained until peer acknowledgement.
+
+Use:
+
+    my $limit = $connection->send_buffer_limit;
+
+to read the current limit.
+
+It returns undef when bounded transmit mode is disabled.
+
+Disable the limit with:
+
+    $connection->send_buffer_limit(undef);
+
+A new limit cannot be smaller than the amount of Stream data already retained.
+
+When a limit is enabled, ordinary L<Net::QUIC::Stream/send> remains
+all-or-nothing. It throws instead of exceeding the configured bound.
+Advanced producers should use L<Net::QUIC::Stream/send_some>.
+
+=head2 send_buffered_bytes
+
+    my $bytes = $connection->send_buffered_bytes;
+
+Returns the total number of Stream data bytes currently retained for transmit
+across this Connection.
+
+This includes sent data that still has to remain available until it is
+acknowledged.
 
 =head1 NETWORK PATH
 

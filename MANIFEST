@@ -52,6 +52,7 @@ t/28-ecn.t
 t/29-protocol-rx.t
 t/30-acked-offset.t
 t/31-stream-activity.t
+t/32-bounded-tx.t
 t/data/server-cert.pem
 t/data/server-key.pem
 xs/net_quic_connection.h

@@ -72,6 +72,25 @@ sub send {
     return;
 }
 
+sub send_some {
+    my ($self, $bytes) = @_;
+
+    croak "send_some requires bytes" if !defined $bytes;
+    croak "cannot send on this unidirectional QUIC stream"
+        if !$self->can_send;
+
+    my $accepted =
+        $self->{connection}->_stream_send_some($self->{id}, $bytes);
+
+    $self->{connection}->_notify_output if $accepted;
+    return $accepted;
+}
+
+sub send_buffered_bytes {
+    my ($self) = @_;
+    return $self->{connection}->_stream_send_buffered_bytes($self->{id});
+}
+
 sub finish {
     my ($self) = @_;
 
@@ -290,6 +309,41 @@ The bytes are copied into Net::QUIC-owned memory.
 When the Stream belongs to a Connection obtained through
 L<Net::QUIC::Driver>, Driver is notified automatically when new transport work
 is needed.
+
+If the Connection has an explicit
+L<Net::QUIC::Connection/send_buffer_limit>, C<send> stays all-or-nothing and
+throws rather than exceeding that limit. Use L</send_some> when partial
+acceptance is wanted.
+
+=head2 send_some
+
+    my $accepted = $stream->send_some($bytes);
+
+Advanced bounded transmit interface.
+
+The Connection must first have a
+L<Net::QUIC::Connection/send_buffer_limit> configured.
+
+Returns the number of prefix bytes copied into Net::QUIC-owned transmit
+memory. This can be zero or less than C<length($bytes)> when the configured
+connection-wide buffer is full.
+
+The caller retains ownership only of bytes that were not accepted and may
+release or reuse the accepted input after this method returns.
+
+When C<send_some> accepts fewer bytes than requested, pause the producer.
+L<Net::QUIC::Connection/on_stream_activity> wakes protocol engines when ACK or
+other Stream progress can make more buffer space available.
+
+=head2 send_buffered_bytes
+
+    my $bytes = $stream->send_buffered_bytes;
+
+Returns the number of this Stream's transmit data bytes currently retained by
+Net::QUIC.
+
+It includes data that has been sent but is still retained until peer
+acknowledgement.
 
 =head2 finish
 

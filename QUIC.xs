@@ -1239,6 +1239,63 @@ _stream_state_count(self)
         RETVAL
 
 SV *
+_send_buffer_limit(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+
+        if (!ep->stream_tx_buffer_limit_enabled) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            RETVAL = newSVuv((UV)ep->stream_tx_buffer_limit);
+        }
+    OUTPUT:
+        RETVAL
+
+void
+_set_send_buffer_limit(self, limit_uv)
+    SV *self
+    UV limit_uv
+    PREINIT:
+        net_quic_connection *ep;
+        uint64_t limit;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        limit = (uint64_t)limit_uv;
+
+        if (ep->stream_tx_buffered_bytes > limit) {
+            croak(
+                "send buffer limit cannot be smaller than currently buffered data"
+            );
+        }
+
+        ep->stream_tx_buffer_limit = limit;
+        ep->stream_tx_buffer_limit_enabled = 1;
+
+void
+_clear_send_buffer_limit(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        ep->stream_tx_buffer_limit_enabled = 0;
+        ep->stream_tx_buffer_limit = 0;
+
+UV
+_send_buffered_bytes(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = (UV)ep->stream_tx_buffered_bytes;
+    OUTPUT:
+        RETVAL
+
+SV *
 _stream_tx_stats(self, stream_id_iv)
     SV *self
     IV stream_id_iv
@@ -1270,6 +1327,7 @@ _stream_send(self, stream_id_iv, data_sv)
         net_quic_stream_state *stream;
         const char *data;
         STRLEN datalen;
+        uint64_t available;
         int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
@@ -1279,14 +1337,97 @@ _stream_send(self, stream_id_iv, data_sv)
         }
 
         data = SvPVbyte(data_sv, datalen);
+
+        if (ep->stream_tx_buffer_limit_enabled) {
+            available = ep->stream_tx_buffer_limit -
+                        ep->stream_tx_buffered_bytes;
+            if ((uint64_t)datalen > available) {
+                croak(
+                    "QUIC send buffer limit exceeded; use send_some for partial acceptance"
+                );
+            }
+        }
+
         rv = net_quic_stream_queue_data(
-            aTHX_ stream,
+            aTHX_ ep,
+            stream,
             (const uint8_t *)data,
             (size_t)datalen
         );
         if (rv != 0) {
             croak("unable to queue QUIC stream data: %s", ngtcp2_strerror(rv));
         }
+
+UV
+_stream_send_some(self, stream_id_iv, data_sv)
+    SV *self
+    IV stream_id_iv
+    SV *data_sv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        const char *data;
+        STRLEN datalen;
+        uint64_t available;
+        uint64_t accepted;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (!ep->stream_tx_buffer_limit_enabled) {
+            croak(
+                "send_some requires a configured connection send_buffer_limit"
+            );
+        }
+
+        data = SvPVbyte(data_sv, datalen);
+        available = ep->stream_tx_buffer_limit -
+                    ep->stream_tx_buffered_bytes;
+        accepted = (uint64_t)datalen;
+        if (accepted > available) {
+            accepted = available;
+        }
+
+        if (accepted != 0) {
+            rv = net_quic_stream_queue_data(
+                aTHX_ ep,
+                stream,
+                (const uint8_t *)data,
+                (size_t)accepted
+            );
+            if (rv != 0) {
+                croak(
+                    "unable to queue QUIC stream data: %s",
+                    ngtcp2_strerror(rv)
+                );
+            }
+        }
+
+        RETVAL = (UV)accepted;
+    OUTPUT:
+        RETVAL
+
+UV
+_stream_send_buffered_bytes(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        RETVAL = (UV)stream->tx_buffered_bytes;
+    OUTPUT:
+        RETVAL
 
 void
 _stream_finish(self, stream_id_iv)
@@ -1649,7 +1790,7 @@ _stream_reset(self, stream_id_iv, app_error_code_uv)
         stream->local_reset = 1;
         stream->local_reset_code = (uint64_t)app_error_code_uv;
         stream->write_shutdown = 1;
-        net_quic_stream_free_tx(aTHX_ stream);
+        net_quic_stream_free_tx(aTHX_ ep, stream);
         net_quic_stream_reclaim_closed(aTHX_ ep);
 
 void
@@ -1712,7 +1853,8 @@ _queue_stream_data(self, stream_id_iv, data_sv, fin)
 
         data = SvPVbyte(data_sv, datalen);
         rv = net_quic_stream_queue_data(
-            aTHX_ stream,
+            aTHX_ ep,
+            stream,
             (const uint8_t *)data,
             (size_t)datalen
         );

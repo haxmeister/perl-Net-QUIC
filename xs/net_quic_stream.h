@@ -55,6 +55,7 @@ struct net_quic_stream_state {
     uint64_t rx_next_offset;
     uint64_t tx_next_offset;
     uint64_t tx_acked_through;
+    uint64_t tx_buffered_bytes;
     int fin_acked;
 
     net_quic_stream_tx_chunk *tx_head;
@@ -359,10 +360,14 @@ net_quic_stream_rx_chunk_free(pTHX_ net_quic_stream_rx_chunk *chunk)
 }
 
 static void
-net_quic_stream_free_tx(pTHX_ net_quic_stream_state *stream)
+net_quic_stream_free_tx(
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
 {
     net_quic_stream_tx_chunk *chunk;
     net_quic_stream_tx_chunk *next;
+    uint64_t released = stream->tx_buffered_bytes;
 
     for (chunk = stream->tx_head; chunk != NULL; chunk = next) {
         next = chunk->next;
@@ -371,6 +376,8 @@ net_quic_stream_free_tx(pTHX_ net_quic_stream_state *stream)
 
     stream->tx_head = NULL;
     stream->tx_tail = NULL;
+    stream->tx_buffered_bytes = 0;
+    ep->stream_tx_buffered_bytes -= released;
 }
 
 static void
@@ -430,7 +437,7 @@ net_quic_stream_apply_deferred_discards(
         }
 
         stream->tx_discard_pending = 0;
-        net_quic_stream_free_tx(aTHX_ stream);
+        net_quic_stream_free_tx(aTHX_ ep, stream);
     }
 }
 
@@ -475,7 +482,7 @@ net_quic_stream_unlink_free(
         ep->tx_cursor = NULL;
     }
 
-    net_quic_stream_free_tx(aTHX_ cur);
+    net_quic_stream_free_tx(aTHX_ ep, cur);
     net_quic_stream_free_rx(aTHX_ cur);
     Safefree(cur);
 }
@@ -542,7 +549,7 @@ net_quic_streams_free(pTHX_ net_quic_connection *ep)
 
     for (stream = ep->streams; stream != NULL; stream = next) {
         next = stream->next;
-        net_quic_stream_free_tx(aTHX_ stream);
+        net_quic_stream_free_tx(aTHX_ ep, stream);
         net_quic_stream_free_rx(aTHX_ stream);
         Safefree(stream);
     }
@@ -611,7 +618,8 @@ net_quic_stream_open_local(
 
 static int
 net_quic_stream_queue_data(
-    pTHX_ net_quic_stream_state *stream,
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream,
     const uint8_t *data,
     size_t datalen
 )
@@ -630,7 +638,8 @@ net_quic_stream_queue_data(
         stream->write_shutdown || stream->closed) {
         return NGTCP2_ERR_STREAM_SHUT_WR;
     }
-    if (datalen > UINT64_MAX - stream->tx_next_offset) {
+    if (datalen > UINT64_MAX - stream->tx_next_offset ||
+        datalen > UINT64_MAX - ep->stream_tx_buffered_bytes) {
         return NGTCP2_ERR_INVALID_ARGUMENT;
     }
 
@@ -671,6 +680,8 @@ net_quic_stream_queue_data(
     }
     stream->tx_tail = tail;
     stream->tx_next_offset += (uint64_t)datalen;
+    stream->tx_buffered_bytes += (uint64_t)datalen;
+    ep->stream_tx_buffered_bytes += (uint64_t)datalen;
 
     return 0;
 
@@ -763,14 +774,7 @@ net_quic_stream_tx_chunk_count(const net_quic_stream_state *stream)
 static uint64_t
 net_quic_stream_tx_buffered_bytes(const net_quic_stream_state *stream)
 {
-    const net_quic_stream_tx_chunk *chunk;
-    uint64_t total = 0;
-
-    for (chunk = stream->tx_head; chunk != NULL; chunk = chunk->next) {
-        total += (uint64_t)chunk->len;
-    }
-
-    return total;
+    return stream->tx_buffered_bytes;
 }
 
 static size_t
@@ -962,7 +966,10 @@ net_quic_stream_consume_explicit_rx(
 }
 
 static void
-net_quic_stream_release_acked(pTHX_ net_quic_stream_state *stream)
+net_quic_stream_release_acked(
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
 {
     net_quic_stream_tx_chunk *chunk;
     uint64_t end;
@@ -986,6 +993,9 @@ net_quic_stream_release_acked(pTHX_ net_quic_stream_state *stream)
         if (stream->tx_head == NULL) {
             stream->tx_tail = NULL;
         }
+
+        stream->tx_buffered_bytes -= (uint64_t)chunk->len;
+        ep->stream_tx_buffered_bytes -= (uint64_t)chunk->len;
         net_quic_stream_tx_chunk_free(aTHX_ chunk);
     }
 }
@@ -1124,7 +1134,7 @@ net_quic_acked_stream_data_offset_cb(
         }
     }
 
-    net_quic_stream_release_acked(aTHX_ stream);
+    net_quic_stream_release_acked(aTHX_ ep, stream);
     if (changed) {
         net_quic_stream_mark_activity(ep, stream);
     }
@@ -1157,7 +1167,7 @@ net_quic_stream_close_cb(
         stream->closed = 1;
         stream->write_shutdown = 1;
         stream->read_shutdown = 1;
-        net_quic_stream_free_tx(aTHX_ stream);
+        net_quic_stream_free_tx(aTHX_ ep, stream);
         net_quic_stream_mark_activity(ep, stream);
     }
 

@@ -413,6 +413,12 @@ net_quic_stream_announce_incoming(
     net_quic_stream_mark_activity(ep, stream);
 }
 
+static void
+net_quic_stream_unlink_free(
+    pTHX_ net_quic_connection *ep,
+    net_quic_stream_state *stream
+);
+
 static net_quic_stream_state *
 net_quic_stream_create(
     pTHX_ net_quic_connection *ep,

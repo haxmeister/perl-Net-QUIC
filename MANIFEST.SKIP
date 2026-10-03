@@ -15,5 +15,6 @@
 ^\.prove$
 ^handoff\.md$
 ^missing_features\.md$
+^protocol_engine_plan\.md$
 ~$
 \.bak$

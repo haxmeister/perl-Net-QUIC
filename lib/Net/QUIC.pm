@@ -5,7 +5,7 @@ use warnings;
 
 use XSLoader ();
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -218,6 +218,33 @@ Open streams with:
 
 These methods can return undef when the peer's current stream limit has been
 reached. That is normal flow control, not a failed Connection.
+
+=head1 ADVANCED PROTOCOL ENGINES
+
+Ordinary applications can ignore this section.
+
+Protocol engines that need explicit receive consumption, acknowledgement
+progress, Stream wake-ups, or bounded transmit memory can use:
+
+    Connection:
+        on_stream_activity
+        next_active_stream_id
+        send_buffer_limit
+        send_buffered_bytes
+
+    Stream:
+        next_data_chunk
+        consume
+        acked_offset
+        send_some
+        send_buffered_bytes
+
+The ordinary C<send>, C<finish>, and C<next_data> API remains unchanged.
+
+These are transport primitives. Net::QUIC does not add HTTP/3 or other
+application-protocol semantics.
+
+See L<Net::QUIC::Connection> and L<Net::QUIC::Stream> for the details.
 
 =head1 CLOSING AND ERRORS
 

@@ -498,6 +498,36 @@ $connection->on_stream_available(sub {
 });
 ```
 
+## Advanced protocol-engine integration
+
+Ordinary applications do not need these APIs.
+
+A protocol engine that needs tighter control over receive consumption,
+acknowledgement progress, Stream wake-ups, or transmit memory can use:
+
+```text
+Connection:
+    on_stream_activity
+    next_active_stream_id
+    send_buffer_limit
+    send_buffered_bytes
+
+Stream:
+    next_data_chunk
+    consume
+    acked_offset
+    send_some
+    send_buffered_bytes
+```
+
+The ordinary `send`, `finish`, and `next_data` API remains unchanged.
+
+These are transport primitives only. Net::QUIC does not add HTTP/3 or other
+application-protocol semantics.
+
+See the `Net::QUIC::Connection` and `Net::QUIC::Stream` POD for the exact
+contracts.
+
 ## Closing a connection
 
 Start a normal application close with:

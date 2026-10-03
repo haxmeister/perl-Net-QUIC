@@ -1,5 +1,36 @@
 Revision history for Net-QUIC
 
+0.03  2026-10-02
+    - Add an advanced protocol-engine interface while keeping Net::QUIC
+      transport-neutral and preserving the ordinary send/finish/next_data API.
+    - Add Stream->next_data_chunk and Stream->consume for explicit receive
+      consumption and exact receive flow-control credit.
+    - Prevent ordinary next_data and explicit receive mode from being mixed on
+      the same Stream.
+    - Add Stream->acked_offset as a monotonic contiguous peer-acknowledgement
+      high-water mark.
+    - Add Connection->on_stream_activity and next_active_stream_id with
+      coalesced per-Stream wake-ups for receive, ACK, FIN, reset,
+      STOP_SENDING, close, and newly created peer Streams.
+    - Add Connection->send_buffer_limit and send_buffered_bytes plus
+      Stream->send_some and send_buffered_bytes for hard connection-wide
+      transmit-memory bounds and producer backpressure.
+    - Keep bounded transmit accounting O(1) and release retained bytes on ACK,
+      reset, STOP_SENDING, close, and Stream reclamation.
+    - Restore connection receive credit when a closed explicit-receive Stream
+      is reclaimed with unread or delivered-but-unconsumed bytes.
+    - Add native Stream-ID indexing so protocol-engine lookups remain fast with
+      thousands of live Streams instead of scanning the Stream list.
+    - Add repeatable protocol-engine performance benchmarks. On the release
+      benchmark runner, worst-case lookup at 5000 Streams improved from about
+      24 thousand lookups/sec to about 4.7 million lookups/sec.
+    - Add focused coverage for explicit receive consumption, ACK progress,
+      activity coalescing, bounded transmit buffering, receive-credit
+      reclamation, QUIC v2 protocol-engine behavior, and high Stream counts.
+    - Keep exact FIN acknowledgement intentionally unexposed because ngtcp2
+      does not provide a complete public FIN-ACK signal for every data+FIN
+      case.
+
 0.02  2026-10-02
     - Simplify the public documentation for readers who are new to QUIC,
       event-loop integration, and the native implementation.

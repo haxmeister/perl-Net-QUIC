@@ -166,7 +166,10 @@ struct net_quic_connection {
     net_quic_stream_state *streams_tail;
     net_quic_stream_state *incoming_stream_head;
     net_quic_stream_state *incoming_stream_tail;
+    net_quic_stream_state *stream_activity_head;
+    net_quic_stream_state *stream_activity_tail;
     net_quic_stream_state *tx_cursor;
+    int stream_activity_enabled;
 
     ptls_context_t ptls_ctx;
     ngtcp2_crypto_picotls_ctx picotls_ctx;

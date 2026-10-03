@@ -329,6 +329,7 @@ sub _server_receive_datagram {
         );
 
         $connection->_receive_datagram($bytes, $local, $peer, $ecn);
+        $connection->_dispatch_stream_activity;
         $connection->_dispatch_stream_availability;
 
         $self->{routes}{$initial_dcid} = $connection;
@@ -340,7 +341,8 @@ sub _server_receive_datagram {
     }
 
     $connection->_receive_datagram($bytes, $local, $peer, $ecn);
-    $connection->_dispatch_stream_availability;
+    $connection->_dispatch_stream_activity;
+        $connection->_dispatch_stream_availability;
     $self->_sync_server_routes($connection);
     $self->_retire_server_connections;
     return;
@@ -446,6 +448,7 @@ sub receive_datagram {
         $peer,
         0 + $ecn,
     );
+    $self->{connection}->_dispatch_stream_activity;
     $self->{connection}->_dispatch_stream_availability;
     return;
 }

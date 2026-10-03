@@ -34,6 +34,7 @@ struct net_quic_stream_state {
     int early_data;
     int incoming_announced;
     int incoming_queued;
+    int activity_queued;
     size_t public_refs;
     int remote_finished;
     int local_finished;
@@ -63,6 +64,7 @@ struct net_quic_stream_state {
 
     net_quic_stream_state *next;
     net_quic_stream_state *incoming_next;
+    net_quic_stream_state *activity_next;
 };
 
 static int
@@ -105,6 +107,140 @@ net_quic_stream_find(net_quic_connection *ep, int64_t stream_id)
 }
 
 static void
+net_quic_stream_mark_activity(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    if (!ep->stream_activity_enabled || stream->activity_queued) {
+        return;
+    }
+
+    stream->activity_queued = 1;
+    stream->activity_next = NULL;
+
+    if (ep->stream_activity_tail != NULL) {
+        ep->stream_activity_tail->activity_next = stream;
+    } else {
+        ep->stream_activity_head = stream;
+    }
+
+    ep->stream_activity_tail = stream;
+}
+
+static void
+net_quic_stream_remove_activity(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    net_quic_stream_state *prev = NULL;
+    net_quic_stream_state *cur;
+
+    if (!stream->activity_queued) {
+        return;
+    }
+
+    for (cur = ep->stream_activity_head;
+         cur != NULL && cur != stream;
+         cur = cur->activity_next) {
+        prev = cur;
+    }
+
+    if (cur != NULL) {
+        if (prev != NULL) {
+            prev->activity_next = cur->activity_next;
+        } else {
+            ep->stream_activity_head = cur->activity_next;
+        }
+
+        if (ep->stream_activity_tail == cur) {
+            ep->stream_activity_tail = prev;
+        }
+    }
+
+    stream->activity_queued = 0;
+    stream->activity_next = NULL;
+}
+
+static void
+net_quic_stream_clear_activity(net_quic_connection *ep)
+{
+    net_quic_stream_state *stream;
+    net_quic_stream_state *next;
+
+    for (stream = ep->stream_activity_head; stream != NULL; stream = next) {
+        next = stream->activity_next;
+        stream->activity_queued = 0;
+        stream->activity_next = NULL;
+    }
+
+    ep->stream_activity_head = NULL;
+    ep->stream_activity_tail = NULL;
+}
+
+static int
+net_quic_stream_has_latched_activity(
+    const net_quic_stream_state *stream
+)
+{
+    return stream->incoming_queued ||
+           stream->rx_head != NULL ||
+           stream->remote_finished ||
+           stream->remote_reset ||
+           stream->remote_stop_sending ||
+           stream->closed ||
+           stream->tx_acked_through != 0 ||
+           stream->fin_acked;
+}
+
+static void
+net_quic_stream_set_activity_enabled(
+    net_quic_connection *ep,
+    int enabled
+)
+{
+    net_quic_stream_state *stream;
+
+    if (!enabled) {
+        ep->stream_activity_enabled = 0;
+        net_quic_stream_clear_activity(ep);
+        return;
+    }
+
+    if (ep->stream_activity_enabled) {
+        return;
+    }
+
+    ep->stream_activity_enabled = 1;
+
+    for (stream = ep->streams; stream != NULL; stream = stream->next) {
+        if (net_quic_stream_has_latched_activity(stream)) {
+            net_quic_stream_mark_activity(ep, stream);
+        }
+    }
+}
+
+static net_quic_stream_state *
+net_quic_stream_next_activity(net_quic_connection *ep)
+{
+    net_quic_stream_state *stream = ep->stream_activity_head;
+
+    if (stream == NULL) {
+        return NULL;
+    }
+
+    ep->stream_activity_head = stream->activity_next;
+    if (ep->stream_activity_head == NULL) {
+        ep->stream_activity_tail = NULL;
+    }
+
+    stream->activity_queued = 0;
+    stream->activity_next = NULL;
+    return stream;
+}
+
+static void
 net_quic_stream_announce_incoming(
     net_quic_connection *ep,
     net_quic_stream_state *stream
@@ -125,6 +261,7 @@ net_quic_stream_announce_incoming(
     }
 
     ep->incoming_stream_tail = stream;
+    net_quic_stream_mark_activity(ep, stream);
 }
 
 static net_quic_stream_state *
@@ -316,6 +453,7 @@ net_quic_stream_unlink_free(
         return;
     }
 
+    net_quic_stream_remove_activity(ep, cur);
     next = cur->next;
 
     if (prev != NULL) {
@@ -347,7 +485,8 @@ net_quic_stream_reclaimable(const net_quic_stream_state *stream)
 {
     return stream->closed &&
            stream->public_refs == 0 &&
-           !stream->incoming_queued;
+           !stream->incoming_queued &&
+           !stream->activity_queued;
 }
 
 static void
@@ -412,6 +551,8 @@ net_quic_streams_free(pTHX_ net_quic_connection *ep)
     ep->streams_tail = NULL;
     ep->incoming_stream_head = NULL;
     ep->incoming_stream_tail = NULL;
+    ep->stream_activity_head = NULL;
+    ep->stream_activity_tail = NULL;
     ep->tx_cursor = NULL;
 }
 
@@ -934,6 +1075,7 @@ net_quic_recv_stream_data_cb(
         stream->rx_head = chunk;
     }
     stream->rx_tail = chunk;
+    net_quic_stream_mark_activity(ep, stream);
 
     return 0;
 }
@@ -953,6 +1095,7 @@ net_quic_acked_stream_data_offset_cb(
     net_quic_stream_state *stream =
         (net_quic_stream_state *)stream_user_data;
     uint64_t end;
+    int changed = 0;
 
     (void)conn;
 
@@ -964,8 +1107,11 @@ net_quic_acked_stream_data_offset_cb(
     }
 
     if (datalen == 0) {
-        if (stream->local_finished && offset == stream->tx_next_offset) {
+        if (stream->local_finished &&
+            offset == stream->tx_next_offset &&
+            !stream->fin_acked) {
             stream->fin_acked = 1;
+            changed = 1;
         }
     } else {
         if (datalen > UINT64_MAX - offset) {
@@ -974,10 +1120,14 @@ net_quic_acked_stream_data_offset_cb(
         end = offset + datalen;
         if (end > stream->tx_acked_through) {
             stream->tx_acked_through = end;
+            changed = 1;
         }
     }
 
     net_quic_stream_release_acked(aTHX_ stream);
+    if (changed) {
+        net_quic_stream_mark_activity(ep, stream);
+    }
     return 0;
 }
 
@@ -1008,6 +1158,7 @@ net_quic_stream_close_cb(
         stream->write_shutdown = 1;
         stream->read_shutdown = 1;
         net_quic_stream_free_tx(aTHX_ stream);
+        net_quic_stream_mark_activity(ep, stream);
     }
 
     return 0;
@@ -1040,6 +1191,7 @@ net_quic_stream_reset_cb(
     stream->remote_reset = 1;
     stream->remote_reset_code = app_error_code;
     stream->read_shutdown = 1;
+    net_quic_stream_mark_activity(ep, stream);
     return 0;
 }
 
@@ -1071,6 +1223,7 @@ net_quic_recv_stop_sending_cb(
     stream->remote_stop_sending_code = app_error_code;
     stream->write_shutdown = 1;
     stream->tx_discard_pending = 1;
+    net_quic_stream_mark_activity(ep, stream);
 
     return 0;
 }

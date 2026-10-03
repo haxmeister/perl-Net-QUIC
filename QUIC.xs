@@ -1106,6 +1106,51 @@ _take_stream_available(self)
     OUTPUT:
         RETVAL
 
+void
+_set_stream_activity_enabled(self, enabled)
+    SV *self
+    int enabled
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        net_quic_stream_set_activity_enabled(ep, enabled ? 1 : 0);
+        if (!enabled) {
+            net_quic_stream_reclaim_closed(aTHX_ ep);
+        }
+
+int
+_stream_activity_pending(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = ep->stream_activity_head != NULL ? 1 : 0;
+    OUTPUT:
+        RETVAL
+
+SV *
+_next_active_stream_id(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        int64_t stream_id;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_next_activity(ep);
+
+        if (stream == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            stream_id = stream->id;
+            net_quic_stream_reclaim_closed(aTHX_ ep);
+            RETVAL = newSViv((IV)stream_id);
+        }
+    OUTPUT:
+        RETVAL
+
 SV *
 _next_stream_id(self)
     SV *self

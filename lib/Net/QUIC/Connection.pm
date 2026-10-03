@@ -12,6 +12,8 @@ our $VERSION = '0.02';
 
 fieldhash my %OUTPUT_CALLBACK;
 fieldhash my %STREAM_AVAILABLE_CALLBACK;
+fieldhash my %STREAM_ACTIVITY_CALLBACK;
+fieldhash my %STREAM_ACTIVITY_NOTIFIED;
 
 my $EARLY_DATA_MAGIC = "NQED";
 my $EARLY_DATA_VERSION = 1;
@@ -196,6 +198,49 @@ sub _dispatch_stream_availability {
     $callback->($self, 'bidi') if $events & 0x01;
     $callback->($self, 'uni')  if $events & 0x02;
     return;
+}
+
+sub on_stream_activity {
+    my ($self, $callback) = @_;
+
+    delete $STREAM_ACTIVITY_NOTIFIED{$self};
+
+    if (defined $callback) {
+        die "stream activity callback must be a coderef"
+            if ref($callback) ne 'CODE';
+        $STREAM_ACTIVITY_CALLBACK{$self} = $callback;
+        $self->_set_stream_activity_enabled(1);
+    } else {
+        delete $STREAM_ACTIVITY_CALLBACK{$self};
+        $self->_set_stream_activity_enabled(0);
+    }
+
+    $self->_dispatch_stream_activity;
+    return $self;
+}
+
+sub _dispatch_stream_activity {
+    my ($self) = @_;
+
+    my $callback = $STREAM_ACTIVITY_CALLBACK{$self};
+    return if !$callback;
+    return if $STREAM_ACTIVITY_NOTIFIED{$self};
+    return if !$self->_stream_activity_pending;
+
+    $STREAM_ACTIVITY_NOTIFIED{$self} = 1;
+    $callback->($self);
+    return;
+}
+
+sub next_active_stream_id {
+    my ($self) = @_;
+
+    my $id = $self->_next_active_stream_id;
+
+    delete $STREAM_ACTIVITY_NOTIFIED{$self}
+        if !defined($id) || !$self->_stream_activity_pending;
+
+    return $id;
 }
 
 sub open_bidi_stream {
@@ -542,6 +587,44 @@ A Stream can be bidirectional or unidirectional. Use:
     $stream->can_receive
 
 when code needs to handle either kind.
+
+=head2 on_stream_activity
+
+    $connection->on_stream_activity(sub {
+        my ($connection) = @_;
+        ...
+    });
+
+Registers an advanced protocol-engine wake-up callback.
+
+The callback runs when one or more Streams have meaningful new activity, such
+as received data, FIN, acknowledgement progress, RESET_STREAM, STOP_SENDING,
+stream close, or a newly peer-created Stream.
+
+The callback does not receive one event object per transport event. Activity is
+coalesced by Stream.
+
+Drain the changed Stream IDs with L</next_active_stream_id>.
+
+Pass undef to disable activity tracking:
+
+    $connection->on_stream_activity(undef);
+
+Activity tracking is opt-in so ordinary applications pay no queueing cost.
+
+=head2 next_active_stream_id
+
+    while (defined(my $id = $connection->next_active_stream_id)) {
+        ...
+    }
+
+Returns the next Stream ID with coalesced activity.
+
+Returns undef when the activity queue is empty.
+
+A protocol engine should normally drain this queue when L</on_stream_activity>
+wakes it. State such as received data, acknowledgement offsets, reset codes,
+and STOP_SENDING codes remains available on the corresponding Stream object.
 
 =head1 NETWORK PATH
 

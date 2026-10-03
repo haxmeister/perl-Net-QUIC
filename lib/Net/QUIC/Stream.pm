@@ -121,6 +121,11 @@ sub consume {
     return;
 }
 
+sub acked_offset {
+    my ($self) = @_;
+    return $self->{connection}->_stream_acked_offset($self->{id});
+}
+
 sub remote_finished {
     my ($self) = @_;
     return $self->{connection}->_stream_remote_finished($self->{id});
@@ -361,6 +366,18 @@ consumed.
 Calling C<consume> selects the explicit receive mode for the Stream, even when
 the byte count is zero. Do not use L</next_data> after selecting explicit
 receive mode.
+
+=head2 acked_offset
+
+    my $offset = $stream->acked_offset;
+
+Returns the number of bytes from the start of this Stream that the peer has
+acknowledged contiguously.
+
+The value starts at zero and never moves backward.
+
+This is an advanced protocol-engine interface. Ordinary applications normally
+do not need acknowledgement offsets.
 
 =head2 remote_finished
 

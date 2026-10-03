@@ -1414,6 +1414,24 @@ _stream_consume(self, stream_id_iv, amount_uv)
             );
         }
 
+UV
+_stream_acked_offset(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        RETVAL = (UV)stream->tx_acked_through;
+    OUTPUT:
+        RETVAL
+
 int
 _stream_remote_finished(self, stream_id_iv)
     SV *self

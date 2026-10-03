@@ -265,4 +265,57 @@ ok(
 );
 $fin_receiver->consume(length($fin_payload) - 1);
 
+my $reset_sender = $client->connection->open_bidi_stream;
+my $reset_payload = "buffered-before-reset\n" x 40;
+$reset_sender->send($reset_payload);
+
+my $reset_receiver;
+for (1 .. 100) {
+    pump_pair();
+
+    while (my $stream = $accepted->next_stream) {
+        if ($stream->id == $reset_sender->id) {
+            $reset_receiver = $stream;
+        }
+    }
+
+    last if $reset_receiver;
+}
+
+isa_ok($reset_receiver, ['Net::QUIC::Stream']);
+
+for (1 .. 20) {
+    pump_pair();
+}
+
+$reset_sender->reset(66);
+
+for (1 .. 500) {
+    pump_pair();
+    last if defined($reset_receiver->remote_reset_code);
+}
+
+is(
+    $reset_receiver->remote_reset_code,
+    66,
+    'remote reset state is visible while receive data remains buffered',
+);
+
+my $reset_data = '';
+my $reset_delivered = 0;
+while (my $event = $reset_receiver->next_data_chunk) {
+    $reset_data .= $event->[0];
+    $reset_delivered += length($event->[0]);
+}
+
+is(
+    $reset_data,
+    $reset_payload,
+    'data buffered before RESET_STREAM remains available to the protocol engine',
+);
+ok(
+    !dies { $reset_receiver->consume($reset_delivered) },
+    'explicit receive credit can be returned after RESET_STREAM',
+);
+
 done_testing;

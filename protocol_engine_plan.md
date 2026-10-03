@@ -26,6 +26,37 @@ while (defined(my $bytes = $stream->next_data)) {
 Ordinary callers must not need to manage offsets, ACKs, native buffers, or
 receive flow-control credit.
 
+## Implementation status
+
+Implemented on `feature/protocol-engine-api`:
+
+- explicit receive delivery with `next_data_chunk`;
+- explicit receive credit with `consume`;
+- receive-mode protection so `next_data` and explicit consumption cannot be
+  mixed accidentally;
+- monotonic contiguous transmit acknowledgement visibility with
+  `acked_offset`;
+- opt-in coalesced Stream activity with `on_stream_activity` and
+  `next_active_stream_id`;
+- connection-wide retained-TX limits with `send_buffer_limit`;
+- partial bounded writes with `send_some`;
+- O(1) per-Stream and per-Connection retained-TX byte accounting;
+- RX credit restoration when a closed Stream with unconsumed delivered data is
+  abandoned;
+- focused QUIC v2 coverage for the advanced protocol-engine path.
+
+Exact FIN acknowledgement is deliberately not public yet. The ngtcp2 byte-ACK
+callback precisely exposes contiguous acknowledged byte progress but does not
+identify every data-plus-FIN acknowledgement in a form that Net::QUIC can
+safely promise as an exact standalone `fin_acked` event. The current
+protocol-engine use case needs acknowledged byte progress, so exposing an
+imprecise FIN acknowledgement flag would add risk without adding a required
+capability.
+
+Remaining validation work is performance measurement and deciding, from those
+measurements, whether a native zero-copy receive consumer or faster Stream-ID
+index is justified.
+
 ## Required advanced capabilities
 
 ### 1. Explicit receive consumption
@@ -70,18 +101,18 @@ native consumer optimization is optional and must be justified by benchmarks.
 Net::QUIC already receives ordered, non-overlapping ngtcp2 stream ACK progress
 and tracks a contiguous native high-water mark.
 
-Initial public shape:
+Public shape:
 
 ```perl
 my $offset = $stream->acked_offset;
-my $fin    = $stream->fin_acked;
 ```
 
 `acked_offset` is a monotonic contiguous byte offset.
 
-Before exposing `fin_acked`, fix native FIN ACK accounting so it is correct
-both for a standalone zero-length FIN and for a STREAM frame carrying data and
-FIN together.
+Do not expose `fin_acked` until Net::QUIC can represent it exactly for both a
+standalone zero-length FIN and a STREAM frame carrying data and FIN together.
+The current protocol-engine interface does not require a separate FIN-ACK
+signal.
 
 No ordinary Stream user is required to inspect ACK state.
 
@@ -203,11 +234,10 @@ chunks.
 
 ### Phase 2 - ACK visibility
 
-1. Verify/fix FIN acknowledgement accounting.
-2. Expose monotonic `acked_offset`.
-3. Expose exact `fin_acked`.
-4. Test retransmission/duplicate ACK safety, normal progress, FIN, reset, and
-   stream closure.
+1. Expose monotonic `acked_offset`.
+2. Test monotonic progress and final acknowledged byte length.
+3. Keep exact FIN acknowledgement private until the underlying event can be
+   represented without inference.
 
 ### Phase 3 - activity queue
 

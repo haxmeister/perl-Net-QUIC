@@ -164,6 +164,9 @@ struct net_quic_connection {
 
     net_quic_stream_state *streams;
     net_quic_stream_state *streams_tail;
+    net_quic_stream_state **stream_index;
+    size_t stream_index_bucket_count;
+    size_t stream_index_size;
     net_quic_stream_state *incoming_stream_head;
     net_quic_stream_state *incoming_stream_tail;
     net_quic_stream_state *stream_activity_head;

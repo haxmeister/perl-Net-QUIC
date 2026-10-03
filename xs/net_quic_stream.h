@@ -64,6 +64,7 @@ struct net_quic_stream_state {
     net_quic_stream_rx_chunk *rx_tail;
 
     net_quic_stream_state *next;
+    net_quic_stream_state *index_next;
     net_quic_stream_state *incoming_next;
     net_quic_stream_state *activity_next;
 };
@@ -93,12 +94,159 @@ net_quic_stream_can_receive(const net_quic_stream_state *stream)
     return stream->bidirectional || !stream->local_initiated;
 }
 
+static size_t
+net_quic_stream_index_bucket(int64_t stream_id, size_t bucket_count)
+{
+    uint64_t value = (uint64_t)stream_id;
+
+    value ^= value >> 33;
+    value *= UINT64_C(0xff51afd7ed558ccd);
+    value ^= value >> 33;
+    value *= UINT64_C(0xc4ceb9fe1a85ec53);
+    value ^= value >> 33;
+
+    return (size_t)(value & (uint64_t)(bucket_count - 1));
+}
+
+static int
+net_quic_stream_index_rehash(
+    pTHX_ net_quic_connection *ep,
+    size_t bucket_count
+)
+{
+    net_quic_stream_state **buckets;
+    net_quic_stream_state *stream;
+    size_t bucket;
+
+    Newxz(buckets, bucket_count, net_quic_stream_state *);
+    if (buckets == NULL) {
+        return -1;
+    }
+
+    for (stream = ep->streams; stream != NULL; stream = stream->next) {
+        stream->index_next = NULL;
+
+        if (stream->id < 0) {
+            continue;
+        }
+
+        bucket = net_quic_stream_index_bucket(stream->id, bucket_count);
+        stream->index_next = buckets[bucket];
+        buckets[bucket] = stream;
+    }
+
+    Safefree(ep->stream_index);
+    ep->stream_index = buckets;
+    ep->stream_index_bucket_count = bucket_count;
+
+    return 0;
+}
+
+static int
+net_quic_stream_index_reserve(
+    pTHX_ net_quic_connection *ep,
+    size_t needed
+)
+{
+    size_t bucket_count = ep->stream_index_bucket_count;
+
+    if (bucket_count == 0) {
+        bucket_count = 64;
+    }
+
+    while (needed > bucket_count - bucket_count / 4) {
+        if (bucket_count > SIZE_MAX / 2) {
+            return -1;
+        }
+        bucket_count *= 2;
+    }
+
+    if (bucket_count == ep->stream_index_bucket_count) {
+        return 0;
+    }
+
+    return net_quic_stream_index_rehash(aTHX_ ep, bucket_count);
+}
+
+static void
+net_quic_stream_index_insert(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    size_t bucket;
+
+    if (stream->id < 0) {
+        return;
+    }
+
+    bucket = net_quic_stream_index_bucket(
+        stream->id,
+        ep->stream_index_bucket_count
+    );
+
+    stream->index_next = ep->stream_index[bucket];
+    ep->stream_index[bucket] = stream;
+    ++ep->stream_index_size;
+}
+
+static void
+net_quic_stream_index_remove(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream
+)
+{
+    net_quic_stream_state *prev = NULL;
+    net_quic_stream_state *cur;
+    size_t bucket;
+
+    if (stream->id < 0 || ep->stream_index_bucket_count == 0) {
+        return;
+    }
+
+    bucket = net_quic_stream_index_bucket(
+        stream->id,
+        ep->stream_index_bucket_count
+    );
+
+    for (cur = ep->stream_index[bucket];
+         cur != NULL && cur != stream;
+         cur = cur->index_next) {
+        prev = cur;
+    }
+
+    if (cur == NULL) {
+        return;
+    }
+
+    if (prev != NULL) {
+        prev->index_next = cur->index_next;
+    } else {
+        ep->stream_index[bucket] = cur->index_next;
+    }
+
+    cur->index_next = NULL;
+    --ep->stream_index_size;
+}
+
 static net_quic_stream_state *
 net_quic_stream_find(net_quic_connection *ep, int64_t stream_id)
 {
     net_quic_stream_state *stream;
+    size_t bucket;
 
-    for (stream = ep->streams; stream != NULL; stream = stream->next) {
+    if (stream_id < 0 || ep->stream_index_bucket_count == 0) {
+        return NULL;
+    }
+
+    bucket = net_quic_stream_index_bucket(
+        stream_id,
+        ep->stream_index_bucket_count
+    );
+
+    for (stream = ep->stream_index[bucket];
+         stream != NULL;
+         stream = stream->index_next) {
         if (stream->id == stream_id) {
             return stream;
         }
@@ -318,6 +466,13 @@ net_quic_stream_ensure_remote(
         return stream;
     }
 
+    if (net_quic_stream_index_reserve(
+            aTHX_ ep,
+            ep->stream_index_size + 1
+        ) != 0) {
+        return NULL;
+    }
+
     stream = net_quic_stream_create(
         aTHX_ ep,
         stream_id,
@@ -329,8 +484,11 @@ net_quic_stream_ensure_remote(
         return NULL;
     }
 
+    net_quic_stream_index_insert(ep, stream);
+
     rv = ngtcp2_conn_set_stream_user_data(conn, stream_id, stream);
     if (rv != 0) {
+        net_quic_stream_unlink_free(aTHX_ ep, stream);
         return NULL;
     }
 
@@ -463,6 +621,7 @@ net_quic_stream_unlink_free(
     }
 
     net_quic_stream_remove_activity(ep, cur);
+    net_quic_stream_index_remove(ep, cur);
     next = cur->next;
 
     if (prev != NULL) {
@@ -561,6 +720,10 @@ net_quic_streams_free(pTHX_ net_quic_connection *ep)
 
     ep->streams = NULL;
     ep->streams_tail = NULL;
+    Safefree(ep->stream_index);
+    ep->stream_index = NULL;
+    ep->stream_index_bucket_count = 0;
+    ep->stream_index_size = 0;
     ep->incoming_stream_head = NULL;
     ep->incoming_stream_tail = NULL;
     ep->stream_activity_head = NULL;
@@ -579,6 +742,13 @@ net_quic_stream_open_local(
     int64_t stream_id = -1;
     int rv;
 
+    if (net_quic_stream_index_reserve(
+            aTHX_ ep,
+            ep->stream_index_size + 1
+        ) != 0) {
+        return NGTCP2_ERR_NOMEM;
+    }
+
     stream = net_quic_stream_create(aTHX_ ep, -1, 1, bidirectional, 0);
     if (stream == NULL) {
         return NGTCP2_ERR_NOMEM;
@@ -595,28 +765,12 @@ net_quic_stream_open_local(
     }
 
     if (rv != 0) {
-        if (ep->streams == stream) {
-            ep->streams = NULL;
-            ep->streams_tail = NULL;
-            ep->tx_cursor = NULL;
-        } else {
-            net_quic_stream_state *prev = ep->streams;
-            while (prev != NULL && prev->next != stream) {
-                prev = prev->next;
-            }
-            if (prev != NULL) {
-                prev->next = NULL;
-                ep->streams_tail = prev;
-                if (ep->tx_cursor == stream) {
-                    ep->tx_cursor = ep->streams;
-                }
-            }
-        }
-        Safefree(stream);
+        net_quic_stream_unlink_free(aTHX_ ep, stream);
         return rv;
     }
 
     stream->id = stream_id;
+    net_quic_stream_index_insert(ep, stream);
     *pstream_id = stream_id;
     return 0;
 }

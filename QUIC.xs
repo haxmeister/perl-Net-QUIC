@@ -1280,17 +1280,30 @@ _stream_take_data(self, stream_id_iv)
             croak("unknown QUIC stream");
         }
 
-        rv = net_quic_stream_consume_rx(ep, stream, &chunk);
-        if (rv != 0) {
+        if (stream->rx_mode == NET_QUIC_STREAM_RX_MODE_EXPLICIT) {
             croak(
-                "unable to consume QUIC stream data: %s",
-                ngtcp2_strerror(rv)
+                "cannot use next_data after explicit QUIC stream receive consumption"
             );
         }
 
-        if (chunk == NULL) {
+        if (stream->rx_head == NULL) {
             RETVAL = &PL_sv_undef;
         } else {
+            if (net_quic_stream_select_rx_mode(
+                    stream,
+                    NET_QUIC_STREAM_RX_MODE_AUTO
+                ) != 0) {
+                croak("unable to select automatic QUIC stream receive mode");
+            }
+
+            rv = net_quic_stream_consume_rx(ep, stream, &chunk);
+            if (rv != 0) {
+                croak(
+                    "unable to consume QUIC stream data: %s",
+                    ngtcp2_strerror(rv)
+                );
+            }
+
             av = newAV();
             av_push(
                 av,
@@ -1302,6 +1315,104 @@ _stream_take_data(self, stream_id_iv)
         }
     OUTPUT:
         RETVAL
+
+SV *
+_stream_take_data_chunk(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        net_quic_stream_rx_chunk *chunk;
+        AV *av;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (stream->rx_mode == NET_QUIC_STREAM_RX_MODE_AUTO) {
+            croak(
+                "cannot use next_data_chunk after automatic QUIC stream receive consumption"
+            );
+        }
+
+        if (stream->rx_head == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            if (net_quic_stream_select_rx_mode(
+                    stream,
+                    NET_QUIC_STREAM_RX_MODE_EXPLICIT
+                ) != 0) {
+                croak("unable to select explicit QUIC stream receive mode");
+            }
+
+            rv = net_quic_stream_take_rx_explicit(stream, &chunk);
+            if (rv != 0) {
+                croak(
+                    "unable to take QUIC stream data without consuming it: %s",
+                    ngtcp2_strerror(rv)
+                );
+            }
+
+            av = newAV();
+            av_push(
+                av,
+                newSVpvn((const char *)chunk->data, (STRLEN)chunk->len)
+            );
+            av_push(av, newSViv(chunk->fin ? 1 : 0));
+            RETVAL = newRV_noinc((SV *)av);
+            net_quic_stream_rx_chunk_free(aTHX_ chunk);
+        }
+    OUTPUT:
+        RETVAL
+
+void
+_stream_consume(self, stream_id_iv, amount_uv)
+    SV *self
+    IV stream_id_iv
+    UV amount_uv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        uint64_t amount;
+        int rv;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            croak("unknown QUIC stream");
+        }
+
+        if (stream->rx_mode == NET_QUIC_STREAM_RX_MODE_AUTO) {
+            croak(
+                "cannot use consume after automatic QUIC stream receive consumption"
+            );
+        }
+
+        if (net_quic_stream_select_rx_mode(
+                stream,
+                NET_QUIC_STREAM_RX_MODE_EXPLICIT
+            ) != 0) {
+            croak("unable to select explicit QUIC stream receive mode");
+        }
+
+        amount = (uint64_t)amount_uv;
+        if (amount > stream->rx_unconsumed) {
+            croak(
+                "cannot consume more QUIC stream data than has been delivered"
+            );
+        }
+
+        rv = net_quic_stream_consume_explicit_rx(ep, stream, amount);
+        if (rv != 0) {
+            croak(
+                "unable to consume explicit QUIC stream data: %s",
+                ngtcp2_strerror(rv)
+            );
+        }
 
 int
 _stream_remote_finished(self, stream_id_iv)
@@ -1565,13 +1676,22 @@ _take_stream_data(self)
     CODE:
         ep = net_quic_connection_from_sv(self);
         stream = ep->streams;
-        while (stream != NULL && stream->rx_head == NULL) {
+        while (stream != NULL &&
+               (stream->rx_head == NULL ||
+                stream->rx_mode == NET_QUIC_STREAM_RX_MODE_EXPLICIT)) {
             stream = stream->next;
         }
 
         if (stream == NULL) {
             RETVAL = &PL_sv_undef;
         } else {
+            if (net_quic_stream_select_rx_mode(
+                    stream,
+                    NET_QUIC_STREAM_RX_MODE_AUTO
+                ) != 0) {
+                croak("unable to select automatic QUIC stream receive mode");
+            }
+
             rv = net_quic_stream_consume_rx(ep, stream, &chunk);
             if (rv != 0) {
                 croak(

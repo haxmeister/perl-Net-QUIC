@@ -3,6 +3,10 @@
 
 #define NET_QUIC_STREAM_TX_CHUNK_SIZE 16384
 
+#define NET_QUIC_STREAM_RX_MODE_NONE 0
+#define NET_QUIC_STREAM_RX_MODE_AUTO 1
+#define NET_QUIC_STREAM_RX_MODE_EXPLICIT 2
+
 typedef struct net_quic_stream_tx_chunk net_quic_stream_tx_chunk;
 typedef struct net_quic_stream_rx_chunk net_quic_stream_rx_chunk;
 
@@ -45,6 +49,8 @@ struct net_quic_stream_state {
     int local_stop_sending;
     uint64_t local_stop_sending_code;
     int tx_discard_pending;
+    int rx_mode;
+    uint64_t rx_unconsumed;
     uint64_t rx_next_offset;
     uint64_t tx_next_offset;
     uint64_t tx_acked_through;
@@ -263,6 +269,11 @@ net_quic_stream_discard_rx(
 
     stream->rx_head = NULL;
     stream->rx_tail = NULL;
+
+    if (stream->rx_unconsumed != 0) {
+        discarded += stream->rx_unconsumed;
+        stream->rx_unconsumed = 0;
+    }
 
     if (discarded != 0) {
         ngtcp2_conn_extend_max_offset(ep->conn, discarded);
@@ -681,6 +692,64 @@ net_quic_stream_next_incoming(net_quic_connection *ep)
 }
 
 static int
+net_quic_stream_select_rx_mode(
+    net_quic_stream_state *stream,
+    int mode
+)
+{
+    if (stream->rx_mode == NET_QUIC_STREAM_RX_MODE_NONE) {
+        stream->rx_mode = mode;
+        return 0;
+    }
+
+    return stream->rx_mode == mode ? 0 : -1;
+}
+
+static int
+net_quic_stream_extend_rx_credit(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream,
+    uint64_t amount
+)
+{
+    int rv;
+
+    if (amount == 0) {
+        return 0;
+    }
+
+    rv = ngtcp2_conn_extend_max_stream_offset(
+        ep->conn,
+        stream->id,
+        amount
+    );
+    if (rv != 0 && rv != NGTCP2_ERR_STREAM_NOT_FOUND) {
+        return rv;
+    }
+
+    ngtcp2_conn_extend_max_offset(ep->conn, amount);
+    return 0;
+}
+
+static net_quic_stream_rx_chunk *
+net_quic_stream_take_rx(net_quic_stream_state *stream)
+{
+    net_quic_stream_rx_chunk *chunk = stream->rx_head;
+
+    if (chunk == NULL) {
+        return NULL;
+    }
+
+    stream->rx_head = chunk->next;
+    if (stream->rx_head == NULL) {
+        stream->rx_tail = NULL;
+    }
+
+    chunk->next = NULL;
+    return chunk;
+}
+
+static int
 net_quic_stream_consume_rx(
     net_quic_connection *ep,
     net_quic_stream_state *stream,
@@ -696,26 +765,58 @@ net_quic_stream_consume_rx(
         return 0;
     }
 
-    if (chunk->len != 0) {
-        rv = ngtcp2_conn_extend_max_stream_offset(
-            ep->conn,
-            stream->id,
-            (uint64_t)chunk->len
-        );
-        if (rv != 0 && rv != NGTCP2_ERR_STREAM_NOT_FOUND) {
-            return rv;
-        }
-
-        ngtcp2_conn_extend_max_offset(ep->conn, (uint64_t)chunk->len);
+    rv = net_quic_stream_extend_rx_credit(
+        ep,
+        stream,
+        (uint64_t)chunk->len
+    );
+    if (rv != 0) {
+        return rv;
     }
 
-    stream->rx_head = chunk->next;
-    if (stream->rx_head == NULL) {
-        stream->rx_tail = NULL;
+    *pchunk = net_quic_stream_take_rx(stream);
+    return 0;
+}
+
+static int
+net_quic_stream_take_rx_explicit(
+    net_quic_stream_state *stream,
+    net_quic_stream_rx_chunk **pchunk
+)
+{
+    net_quic_stream_rx_chunk *chunk = stream->rx_head;
+
+    if (chunk == NULL) {
+        *pchunk = NULL;
+        return 0;
     }
-    chunk->next = NULL;
+
+    if ((uint64_t)chunk->len > UINT64_MAX - stream->rx_unconsumed) {
+        return NGTCP2_ERR_INVALID_ARGUMENT;
+    }
+
+    chunk = net_quic_stream_take_rx(stream);
+    stream->rx_unconsumed += (uint64_t)chunk->len;
     *pchunk = chunk;
 
+    return 0;
+}
+
+static int
+net_quic_stream_consume_explicit_rx(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream,
+    uint64_t amount
+)
+{
+    int rv;
+
+    rv = net_quic_stream_extend_rx_credit(ep, stream, amount);
+    if (rv != 0) {
+        return rv;
+    }
+
+    stream->rx_unconsumed -= amount;
     return 0;
 }
 

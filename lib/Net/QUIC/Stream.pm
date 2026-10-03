@@ -96,6 +96,31 @@ sub next_data {
     return $event->[0];
 }
 
+sub next_data_chunk {
+    my ($self) = @_;
+
+    croak "cannot receive on this unidirectional QUIC stream"
+        if !$self->can_receive;
+
+    my $event = $self->{connection}->_stream_take_data_chunk($self->{id});
+    return if !defined $event;
+
+    return wantarray ? @$event : $event;
+}
+
+sub consume {
+    my ($self, $amount) = @_;
+
+    croak "cannot receive on this unidirectional QUIC stream"
+        if !$self->can_receive;
+    croak "consume requires a non-negative integer byte count"
+        if !defined($amount) || ref($amount) || $amount !~ /\A\d+\z/;
+
+    $self->{connection}->_stream_consume($self->{id}, $amount);
+    $self->{connection}->_notify_output if $amount;
+    return;
+}
+
 sub remote_finished {
     my ($self) = @_;
     return $self->{connection}->_stream_remote_finished($self->{id});
@@ -288,6 +313,54 @@ Returns undef when no received data is currently waiting.
 Always test with C<defined>.
 
 Reading data also returns receive flow-control credit to QUIC automatically.
+
+Do not mix C<next_data> with L</next_data_chunk> or L</consume> on the same
+Stream.
+
+=head2 next_data_chunk
+
+    my ($bytes, $fin) = $stream->next_data_chunk;
+
+This is an advanced receive interface for protocol engines.
+
+It returns the next received byte chunk without returning receive flow-control
+credit to QUIC.
+
+In list context it returns:
+
+    ($bytes, $fin)
+
+C<$fin> is true when this chunk carries the peer's clean end-of-stream marker.
+
+In scalar context it returns an array reference containing those same two
+values.
+
+Returns undef, or an empty list in list context, when no received data is
+currently waiting.
+
+Each chunk is delivered only once. After processing the bytes, report the
+number actually consumed with L</consume>.
+
+Do not mix C<next_data_chunk> with L</next_data> on the same Stream.
+
+=head2 consume
+
+    $stream->consume($byte_count);
+
+Returns receive flow-control credit for bytes previously delivered by
+L</next_data_chunk>.
+
+The byte count may be smaller than the amount delivered. Additional bytes may
+be consumed later.
+
+A count of zero is valid.
+
+It is an error to consume more bytes than have been delivered and not already
+consumed.
+
+Calling C<consume> selects the explicit receive mode for the Stream, even when
+the byte count is zero. Do not use L</next_data> after selecting explicit
+receive mode.
 
 =head2 remote_finished
 

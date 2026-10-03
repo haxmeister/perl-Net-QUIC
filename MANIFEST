@@ -49,6 +49,7 @@ t/25-new-token.t
 t/26-pmtud.t
 t/27-quic-v2-cvn.t
 t/28-ecn.t
+t/29-protocol-rx.t
 t/data/server-cert.pem
 t/data/server-key.pem
 xs/net_quic_connection.h

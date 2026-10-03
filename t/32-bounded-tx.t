@@ -18,6 +18,10 @@ my $server = Net::QUIC::Endpoint->server(
     alpn             => $alpn,
     certificate_file => $cert_file,
     private_key_file => $key_file,
+    transport        => {
+        connection_window => 64 * 1024,
+        stream_window     => 1024,
+    },
 );
 
 my $client = Net::QUIC::Endpoint->client(
@@ -115,6 +119,10 @@ is($accepted_bytes, 3072, 'send_some accepts only the remaining connection capac
 is($sender->send_buffered_bytes, 4096, 'Stream retained bytes reach the configured limit');
 is($connection->send_buffered_bytes, 4096, 'connection retained bytes reach the configured limit');
 is($sender->send_some('C' x 100), 0, 'send_some returns zero while the buffer is full');
+ok(
+    $connection->send_buffered_bytes > 1024,
+    'bounded producer can retain data beyond the peer stream flow-control window',
+);
 
 my $client_wakes = 0;
 $connection->on_stream_activity(sub {

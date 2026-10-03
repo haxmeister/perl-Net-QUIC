@@ -1209,23 +1209,28 @@ _stream_retain(self, stream_id_iv)
             croak("too many Net::QUIC::Stream references");
         }
 
-void
+int
 _stream_release(self, stream_id_iv)
     SV *self
     IV stream_id_iv
     PREINIT:
         net_quic_connection *ep;
         net_quic_stream_state *stream;
+        int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
         stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
         if (stream == NULL) {
-            XSRETURN_EMPTY;
+            RETVAL = 0;
+        } else {
+            rv = net_quic_stream_release(aTHX_ ep, stream);
+            if (rv < 0) {
+                croak("Net::QUIC::Stream reference count underflow");
+            }
+            RETVAL = rv;
         }
-
-        if (net_quic_stream_release(aTHX_ ep, stream) != 0) {
-            croak("Net::QUIC::Stream reference count underflow");
-        }
+    OUTPUT:
+        RETVAL
 
 UV
 _stream_state_count(self)

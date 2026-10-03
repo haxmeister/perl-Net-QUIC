@@ -395,7 +395,7 @@ net_quic_stream_free_rx(pTHX_ net_quic_stream_state *stream)
     stream->rx_tail = NULL;
 }
 
-static void
+static uint64_t
 net_quic_stream_discard_rx(
     pTHX_ net_quic_connection *ep,
     net_quic_stream_state *stream
@@ -422,6 +422,8 @@ net_quic_stream_discard_rx(
     if (discarded != 0) {
         ngtcp2_conn_extend_max_offset(ep->conn, discarded);
     }
+
+    return discarded;
 }
 
 static void
@@ -528,6 +530,8 @@ net_quic_stream_release(
     net_quic_stream_state *stream
 )
 {
+    uint64_t discarded = 0;
+
     if (stream->public_refs == 0) {
         return -1;
     }
@@ -535,10 +539,11 @@ net_quic_stream_release(
     --stream->public_refs;
 
     if (net_quic_stream_reclaimable(stream)) {
+        discarded = net_quic_stream_discard_rx(aTHX_ ep, stream);
         net_quic_stream_unlink_free(aTHX_ ep, stream);
     }
 
-    return 0;
+    return discarded != 0 ? 1 : 0;
 }
 
 static void

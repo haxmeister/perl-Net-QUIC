@@ -31,7 +31,13 @@ sub DESTROY {
     my $connection = $self->{connection};
     return if !defined $connection;
 
-    eval { $connection->_stream_release($self->{id}) };
+    my $need_output = eval {
+        $connection->_stream_release($self->{id});
+    };
+
+    eval { $connection->_notify_output }
+        if $need_output;
+
     return;
 }
 

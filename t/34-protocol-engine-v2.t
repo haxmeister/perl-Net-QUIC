@@ -112,7 +112,7 @@ $connection->on_stream_activity(sub {
 $connection->send_buffer_limit(4096);
 
 my $sender = $connection->open_bidi_stream;
-my $payload = join '', map { "v2-protocol-$_\n" } 1 .. 500;
+my $payload = join '', map { "v2-protocol-$_\n" } 1 .. 280;
 
 my $accepted_bytes = $sender->send_some($payload);
 is($accepted_bytes, 4096, 'QUIC v2 bounded send accepts only configured capacity');

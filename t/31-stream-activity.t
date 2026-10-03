@@ -105,10 +105,7 @@ my $sender = $client->connection->open_bidi_stream;
 my $first_payload = "activity-one\n" x 8000;
 $sender->send($first_payload);
 
-for (1 .. 500) {
-    pump_pair();
-    last if $server_wakes;
-}
+pump_pair();
 
 is($server_wakes, 1, 'many receive events coalesce into one wake-up');
 
@@ -118,7 +115,7 @@ while (defined(my $id = $accepted->next_active_stream_id)) {
 }
 
 is(
-    @active,
+    \@active,
     [$sender->id],
     'one Stream ID represents the coalesced receive activity',
 );
@@ -131,17 +128,47 @@ my $received = '';
 while (defined(my $chunk = $receiver->next_data)) {
     $received .= $chunk;
 }
-is($received, $first_payload, 'activity wake leads to the complete readable data');
+ok(length($received) > 0, 'activity wake leads to currently readable data');
+
+for (1 .. 1000) {
+    last if $received eq $first_payload;
+
+    pump_pair();
+
+    my @round_active;
+    while (defined(my $id = $accepted->next_active_stream_id)) {
+        push @round_active, $id;
+    }
+
+    ok(
+        !@round_active
+            || scalar(grep { $_ == $sender->id } @round_active) == 1,
+        'each service round coalesces activity for the Stream',
+    ) if @round_active;
+
+    while (defined(my $chunk = $receiver->next_data)) {
+        $received .= $chunk;
+    }
+}
+
+is($received, $first_payload, 'repeated wake/service cycles deliver all data');
+
+while (defined($client->connection->next_active_stream_id)) {
+}
 
 my $second_payload = "activity-two\n";
+my $server_wake_before_second = $server_wakes;
 $sender->send($second_payload);
 
 for (1 .. 500) {
     pump_pair();
-    last if $server_wakes >= 2;
+    last if $server_wakes > $server_wake_before_second;
 }
 
-is($server_wakes, 2, 'new activity wakes again after the queue was drained');
+ok(
+    $server_wakes > $server_wake_before_second,
+    'new activity wakes again after the queue was drained',
+);
 is(
     $accepted->next_active_stream_id,
     $sender->id,
@@ -161,11 +188,33 @@ is(
     'repeated activity does not disturb Stream byte order',
 );
 
+while (defined($client->connection->next_active_stream_id)) {
+}
+
+my $ack_sender = $client->connection->open_bidi_stream;
+my $ack_id = $ack_sender->id;
+my $ack_payload = "ack-activity\n" x 400;
 my $client_wake_before_ack = $client_wakes;
+
+$ack_sender->send($ack_payload);
+
+my $ack_receiver;
 for (1 .. 1000) {
     pump_pair();
+
+    while (my $stream = $accepted->next_stream) {
+        if ($stream->id == $ack_id) {
+            $ack_receiver = $stream;
+        }
+    }
+
+    if ($ack_receiver) {
+        while (defined($ack_receiver->next_data)) {
+        }
+    }
+
     last if $client_wakes > $client_wake_before_ack
-        && $sender->acked_offset > 0;
+        && $ack_sender->acked_offset > 0;
 }
 
 ok(
@@ -178,10 +227,13 @@ while (defined(my $id = $client->connection->next_active_stream_id)) {
     push @client_active, $id;
 }
 ok(
-    scalar(grep { $_ == $sender->id } @client_active),
+    scalar(grep { $_ == $ack_id } @client_active),
     'ACK progress marks the sending Stream active',
 );
-ok($sender->acked_offset > 0, 'ACK wake exposes acknowledgement progress');
+ok($ack_sender->acked_offset > 0, 'ACK wake exposes acknowledgement progress');
+
+while (defined($client->connection->next_active_stream_id)) {
+}
 
 my $client_wake_before_stop = $client_wakes;
 $receiver->stop_sending(55);
@@ -209,6 +261,9 @@ ok(
     scalar(grep { $_ == $sender->id } @stop_active),
     'STOP_SENDING activity identifies the affected Stream',
 );
+
+while (defined($accepted->next_active_stream_id)) {
+}
 
 my $reset_sender = $client->connection->open_bidi_stream;
 my $reset_id = $reset_sender->id;

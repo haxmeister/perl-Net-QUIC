@@ -1,0 +1,35 @@
+name: protocol-engine-benchmark
+
+on:
+  push:
+    branches:
+      - feature/protocol-engine-api
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: "5.44"
+
+      - name: Install Alien build support
+        run: cpanm --notest Alien::Build::MM
+
+      - name: Install Alien::ngtcp2 0.03 from CPAN
+        run: cpanm --notest Alien::ngtcp2@0.03
+
+      - name: Install dependencies
+        run: cpanm --installdeps --notest .
+
+      - name: Build Net::QUIC
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Run protocol-engine benchmark
+        run: perl xt/benchmark/protocol_engine.pl

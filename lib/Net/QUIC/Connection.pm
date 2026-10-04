@@ -305,6 +305,11 @@ sub can_receive_datagram {
     return $self->_local_max_datagram_frame_size > 0 ? 1 : 0;
 }
 
+sub max_datagram_payload_size {
+    my ($self) = @_;
+    return $self->_max_datagram_payload_size;
+}
+
 sub peer_max_datagram_frame_size {
     my ($self) = @_;
     return $self->_peer_max_datagram_frame_size;

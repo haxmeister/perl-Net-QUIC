@@ -1423,6 +1423,12 @@ net_quic_tls_early_data_rejected_cb(
     ep->local_uni_stream_waiting = 0;
     ep->stream_available_events = 0;
 
+    if (ep->datagram_tx_pending != NULL &&
+        ep->datagram_tx_pending->early_data) {
+        net_quic_application_datagram_free(ep->datagram_tx_pending);
+        ep->datagram_tx_pending = NULL;
+    }
+
     for (stream = ep->streams; stream != NULL; stream = next) {
         next = stream->next;
 

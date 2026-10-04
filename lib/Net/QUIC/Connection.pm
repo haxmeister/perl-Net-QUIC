@@ -14,6 +14,7 @@ fieldhash my %OUTPUT_CALLBACK;
 fieldhash my %STREAM_AVAILABLE_CALLBACK;
 fieldhash my %STREAM_ACTIVITY_CALLBACK;
 fieldhash my %STREAM_ACTIVITY_NOTIFIED;
+fieldhash my %DATAGRAM_CALLBACK;
 
 my $EARLY_DATA_MAGIC = "NQED";
 my $EARLY_DATA_VERSION = 1;
@@ -241,6 +242,77 @@ sub next_active_stream_id {
         if !defined($id) || !$self->_stream_activity_pending;
 
     return $id;
+}
+
+sub send_datagram {
+    my ($self, $bytes) = @_;
+
+    die "send_datagram requires bytes"
+        if !defined $bytes;
+
+    my $accepted = $self->_queue_datagram($bytes);
+    $self->_notify_output if $accepted;
+
+    return $accepted ? 1 : 0;
+}
+
+sub next_received_datagram {
+    my ($self) = @_;
+
+    my $datagram = $self->_take_received_datagram;
+    return if !defined $datagram;
+
+    return wantarray ? @$datagram : $datagram->[0];
+}
+
+sub on_datagram {
+    my ($self, $callback) = @_;
+
+    if (defined $callback) {
+        die "datagram callback must be a coderef"
+            if ref($callback) ne 'CODE';
+        $DATAGRAM_CALLBACK{$self} = $callback;
+    } else {
+        delete $DATAGRAM_CALLBACK{$self};
+    }
+
+    $self->_dispatch_datagrams;
+    return $self;
+}
+
+sub _dispatch_datagrams {
+    my ($self) = @_;
+
+    my $callback = $DATAGRAM_CALLBACK{$self};
+    return if !$callback;
+
+    while (my $datagram = $self->_take_received_datagram) {
+        $callback->($self, $datagram->[0], $datagram->[1]);
+    }
+
+    return;
+}
+
+sub datagram_supported {
+    my ($self) = @_;
+
+    my $size = $self->_peer_max_datagram_frame_size;
+    return defined($size) && $size > 0 ? 1 : 0;
+}
+
+sub peer_max_datagram_frame_size {
+    my ($self) = @_;
+    return $self->_peer_max_datagram_frame_size;
+}
+
+sub local_max_datagram_frame_size {
+    my ($self) = @_;
+    return $self->_local_max_datagram_frame_size;
+}
+
+sub datagram_receive_drops {
+    my ($self) = @_;
+    return $self->_datagram_receive_drops;
 }
 
 sub send_buffer_limit {

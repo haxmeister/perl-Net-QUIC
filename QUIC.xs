@@ -2123,7 +2123,6 @@ _next_datagram(self)
 
         if (ep->datagram_tx_pending != NULL) {
             application_datagram = ep->datagram_tx_pending;
-            ep->datagram_tx_pending = NULL;
             datagram_accepted = 0;
 
             nwrite = ngtcp2_conn_write_datagram(
@@ -2140,13 +2139,18 @@ _next_datagram(self)
                 now
             );
 
-            net_quic_application_datagram_free(application_datagram);
-
             if (nwrite < 0) {
+                ep->datagram_tx_pending = NULL;
+                net_quic_application_datagram_free(application_datagram);
                 croak(
                     "ngtcp2 DATAGRAM write failed: %s",
                     ngtcp2_strerror((int)nwrite)
                 );
+            }
+
+            if (datagram_accepted) {
+                ep->datagram_tx_pending = NULL;
+                net_quic_application_datagram_free(application_datagram);
             }
         }
 

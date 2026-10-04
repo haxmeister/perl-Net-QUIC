@@ -1319,8 +1319,11 @@ _queue_datagram(self, data_sv)
     CODE:
         ep = net_quic_connection_from_sv(self);
 
-        if (!ep->ready) {
-            croak("QUIC DATAGRAM send requires a completed handshake");
+        if (!ep->ready &&
+            (!ep->early_data_attempted || ep->early_data_rejected)) {
+            croak(
+                "QUIC DATAGRAM send requires a completed handshake or 0-RTT state"
+            );
         }
         if (ep->retired || ep->close_wait ||
             ngtcp2_conn_in_closing_period2(ep->conn) ||
@@ -1357,6 +1360,7 @@ _queue_datagram(self, data_sv)
                 croak("unable to allocate QUIC DATAGRAM");
             }
 
+            datagram->early_data = ep->ready ? 0 : 1;
             ep->datagram_tx_pending = datagram;
             RETVAL = 1;
         }

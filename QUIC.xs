@@ -1271,6 +1271,17 @@ _peer_max_datagram_frame_size(self)
         RETVAL
 
 UV
+_max_datagram_payload_size(self)
+    SV *self
+    PREINIT:
+        net_quic_connection *ep;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        RETVAL = (UV)net_quic_max_datagram_payload_size(ep);
+    OUTPUT:
+        RETVAL
+
+UV
 _local_max_datagram_frame_size(self)
     SV *self
     PREINIT:
@@ -1304,6 +1315,7 @@ _queue_datagram(self, data_sv)
         net_quic_application_datagram *datagram;
         const char *data;
         STRLEN datalen;
+        size_t max_payload_size;
     CODE:
         ep = net_quic_connection_from_sv(self);
 
@@ -1327,6 +1339,11 @@ _queue_datagram(self, data_sv)
                 (size_t)datalen
             )) {
             croak("QUIC DATAGRAM payload exceeds peer max_datagram_frame_size");
+        }
+
+        max_payload_size = net_quic_max_datagram_payload_size(ep);
+        if ((size_t)datalen > max_payload_size) {
+            croak("QUIC DATAGRAM payload exceeds current path capacity");
         }
 
         if (ep->datagram_tx_pending != NULL) {

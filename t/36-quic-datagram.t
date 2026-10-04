@@ -122,8 +122,15 @@ subtest 'bidirectional RFC 9221 datagrams' => sub {
         client_port => 40600,
         server_port => 4600,
     );
-    my $server_connection = handshake($client, $server);
     my $client_connection = $client->connection;
+
+    like(
+        dies { $client_connection->send_datagram('too-early') },
+        qr/requires a completed handshake/,
+        'DATAGRAM send is not silently promoted to 0-RTT',
+    );
+
+    my $server_connection = handshake($client, $server);
 
     is(
         $client_connection->local_max_datagram_frame_size,
@@ -139,6 +146,21 @@ subtest 'bidirectional RFC 9221 datagrams' => sub {
     ok($client_connection->can_receive_datagram, 'client can receive DATAGRAM');
     ok($server_connection->can_send_datagram, 'server can send DATAGRAM');
     ok($server_connection->can_receive_datagram, 'server can receive DATAGRAM');
+
+    my $max_payload = $client_connection->max_datagram_payload_size;
+    ok($max_payload > 0, 'current path exposes a DATAGRAM payload capacity');
+    cmp_ok(
+        $max_payload,
+        '<',
+        $client_connection->path_max_udp_payload_size,
+        'DATAGRAM payload capacity accounts for QUIC packet overhead',
+    );
+
+    like(
+        dies { $client_connection->send_datagram('x' x ($max_payload + 1)) },
+        qr/exceeds current path capacity/,
+        'payload that cannot fit the current path is rejected immediately',
+    );
 
     ok(
         $client_connection->send_datagram('client-one'),
@@ -171,6 +193,17 @@ subtest 'bidirectional RFC 9221 datagrams' => sub {
         'server-one',
         'client receives server DATAGRAM',
     );
+
+    ok(
+        $client_connection->send_datagram(''),
+        'zero-length DATAGRAM is accepted',
+    );
+    pump($client, $server);
+
+    my ($empty, $empty_early) =
+        $server_connection->next_received_datagram;
+    is($empty, '', 'zero-length DATAGRAM is preserved');
+    is($empty_early, 0, 'zero-length normal DATAGRAM is not 0-RTT');
 };
 
 subtest 'datagram callback dispatch' => sub {
@@ -220,6 +253,20 @@ subtest 'one-way negotiation and limits' => sub {
     ok(
         !$server_connection->can_send_datagram,
         'server cannot send because client did not advertise support',
+    );
+    ok(
+        !$client_connection->can_receive_datagram,
+        'client receive direction is disabled',
+    );
+    ok(
+        $server_connection->can_receive_datagram,
+        'server receive direction is enabled',
+    );
+    cmp_ok(
+        $client_connection->max_datagram_payload_size,
+        '<=',
+        62,
+        'payload capacity respects the peer DATAGRAM frame limit',
     );
 
     like(

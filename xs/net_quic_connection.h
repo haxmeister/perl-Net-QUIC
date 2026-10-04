@@ -88,6 +88,9 @@ struct net_quic_application_datagram {
 #define NET_QUIC_DATAGRAM_RX_COUNT_LIMIT 1024u
 #define NET_QUIC_1RTT_AEAD_OVERHEAD 16u
 #define NET_QUIC_MAX_PKT_NUMLEN 4u
+#define NET_QUIC_0RTT_LONG_HEADER_OVERHEAD \
+    (1u + 4u + 1u + NGTCP2_MAX_CIDLEN + 1u + NGTCP2_MAX_CIDLEN + 8u + \
+     NET_QUIC_MAX_PKT_NUMLEN + NET_QUIC_1RTT_AEAD_OVERHEAD)
 
 #define NET_QUIC_STREAM_AVAILABLE_BIDI 0x01u
 #define NET_QUIC_STREAM_AVAILABLE_UNI  0x02u
@@ -313,11 +316,15 @@ net_quic_max_datagram_payload_size(net_quic_connection *ep)
     dcid = ngtcp2_conn_get_dcid(ep->conn);
     path_max = ngtcp2_conn_get_path_max_tx_udp_payload_size2(ep->conn);
 
-    packet_overhead =
-        1u +
-        (uint64_t)dcid->datalen +
-        NET_QUIC_MAX_PKT_NUMLEN +
-        NET_QUIC_1RTT_AEAD_OVERHEAD;
+    if (!ep->ready && ep->early_data_attempted) {
+        packet_overhead = NET_QUIC_0RTT_LONG_HEADER_OVERHEAD;
+    } else {
+        packet_overhead =
+            1u +
+            (uint64_t)dcid->datalen +
+            NET_QUIC_MAX_PKT_NUMLEN +
+            NET_QUIC_1RTT_AEAD_OVERHEAD;
+    }
 
     if (path_max <= packet_overhead) {
         return 0;

@@ -51,14 +51,6 @@ Net::QUIC does not expose deployment-specific CID policy such as:
 
 ## Standardized QUIC extensions not yet implemented
 
-### QUIC DATAGRAM
-
-Net::QUIC does not implement the standardized QUIC DATAGRAM extension for
-unreliable, unordered application datagrams carried inside a QUIC connection.
-
-This is distinct from Net::QUIC::Datagram, which represents the UDP packets
-that carry QUIC itself.
-
 ### QUIC bit greasing
 
 Net::QUIC does not currently expose or deliberately configure QUIC-bit
@@ -81,15 +73,15 @@ other advanced recovery knobs.
 
 ## Highest-priority remaining transport features
 
-The largest remaining feature groups are:
-
-1. QUIC DATAGRAM
-2. qlog and advanced congestion-control configuration
+The largest remaining feature group is qlog and advanced congestion-control
+configuration.
 
 ## Already implemented
 
 The following should not be treated as missing:
 
+- RFC 9221 QUIC DATAGRAM transport with directional negotiation, bounded
+  buffering, path-aware payload sizing, and 0-RTT support
 - QUIC v1 transport
 - server acceptance of negotiated QUIC versions
 - Version Negotiation responses

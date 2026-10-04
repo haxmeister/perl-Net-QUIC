@@ -293,11 +293,16 @@ sub _dispatch_datagrams {
     return;
 }
 
-sub datagram_supported {
+sub can_send_datagram {
     my ($self) = @_;
 
     my $size = $self->_peer_max_datagram_frame_size;
     return defined($size) && $size > 0 ? 1 : 0;
+}
+
+sub can_receive_datagram {
+    my ($self) = @_;
+    return $self->_local_max_datagram_frame_size > 0 ? 1 : 0;
 }
 
 sub peer_max_datagram_frame_size {

@@ -332,6 +332,63 @@ subtest 'bounded receive fallback queue' => sub {
     );
 };
 
+subtest 'lost DATAGRAM is not retransmitted' => sub {
+    my ($client, $server) = make_pair(
+        client_port => 40605,
+        server_port => 4605,
+    );
+    my $server_connection = handshake($client, $server);
+    my $client_connection = $client->connection;
+
+    ok(
+        $client_connection->send_datagram('drop-me'),
+        'DATAGRAM selected for the loss test is accepted',
+    );
+
+    my $dropped;
+    for (1 .. 20) {
+        my $wire = $client->next_datagram;
+        last if !defined $wire;
+
+        if ($client_connection->send_datagram('survives')) {
+            $dropped = $wire;
+            last;
+        }
+    }
+
+    ok($dropped, 'packet containing the first DATAGRAM is deliberately dropped');
+
+    my @received;
+    for (1 .. 1000) {
+        pump($client, $server);
+
+        while (defined(my $bytes = $server_connection->next_received_datagram)) {
+            push @received, $bytes;
+        }
+
+        last if grep { $_ eq 'survives' } @received;
+    }
+
+    is(
+        \@received,
+        ['survives'],
+        'later DATAGRAM arrives without retransmitting the dropped payload',
+    );
+
+    for (1 .. 100) {
+        pump($client, $server);
+
+        while (defined(my $bytes = $server_connection->next_received_datagram)) {
+            push @received, $bytes;
+        }
+    }
+
+    is(
+        \@received,
+        ['survives'],
+        'loss recovery never recreates the dropped unreliable DATAGRAM',
+    );
+};
 subtest 'QUIC v2 datagram transport' => sub {
     my ($client, $server) = make_pair(
         client_port => 40603,

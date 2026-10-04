@@ -1392,7 +1392,12 @@ _take_received_datagram(self)
             av = newAV();
             av_push(
                 av,
-                newSVpvn((const char *)datagram->data, (STRLEN)datagram->len)
+                datagram->len == 0
+                    ? newSVpvn("", 0)
+                    : newSVpvn(
+                        (const char *)datagram->data,
+                        (STRLEN)datagram->len
+                    )
             );
             av_push(av, newSViv(datagram->early_data ? 1 : 0));
             RETVAL = newRV_noinc((SV *)av);

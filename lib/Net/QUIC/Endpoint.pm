@@ -654,12 +654,13 @@ version.
 Client and server both accept:
 
     transport => {
-        handshake_timeout => 10,
-        idle_timeout      => 30,
-        connection_window => 1024 * 1024,
-        stream_window     => 256 * 1024,
-        max_bidi_streams  => 100,
-        max_uni_streams   => 100,
+        handshake_timeout       => 10,
+        idle_timeout            => 30,
+        connection_window       => 1024 * 1024,
+        stream_window           => 256 * 1024,
+        max_bidi_streams        => 100,
+        max_uni_streams         => 100,
+        max_datagram_frame_size => 0,
     }
 
 These are the defaults.
@@ -677,7 +678,15 @@ C<stream_window> is the starting receive allowance for each Stream.
 C<max_bidi_streams> and C<max_uni_streams> are the initial numbers of
 peer-created streams that may exist at once.
 
-These are flow-control starting values, not lifetime byte or stream limits.
+C<max_datagram_frame_size> advertises this endpoint's RFC 9221 QUIC DATAGRAM
+receive limit. Zero disables QUIC DATAGRAM receive support. A value such as
+65535 enables it while the actual sendable payload is still limited by the
+peer and the current network path.
+
+See L<Net::QUIC::Connection/QUIC DATAGRAM>.
+
+The Stream values are flow-control starting values, not lifetime byte or
+stream limits.
 
 =head2 server
 

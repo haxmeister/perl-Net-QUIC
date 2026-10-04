@@ -673,6 +673,7 @@ net_quic_stream_reclaim_closed(pTHX_ net_quic_connection *ep)
         next = stream->next;
 
         if (net_quic_stream_reclaimable(stream)) {
+            net_quic_stream_discard_rx(aTHX_ ep, stream);
             net_quic_stream_unlink_free(aTHX_ ep, stream);
         }
     }

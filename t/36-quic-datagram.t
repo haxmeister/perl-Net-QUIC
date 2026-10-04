@@ -293,6 +293,45 @@ subtest 'one-way negotiation and limits' => sub {
     );
 };
 
+subtest 'bounded receive fallback queue' => sub {
+    my ($client, $server) = make_pair(
+        client_port => 40604,
+        server_port => 4604,
+    );
+    my $server_connection = handshake($client, $server);
+    my $client_connection = $client->connection;
+    my $sent = 0;
+
+    for (1 .. 1025) {
+        if (!$client_connection->send_datagram('')) {
+            pump($client, $server);
+            next if !$client_connection->send_datagram('');
+        }
+
+        ++$sent;
+        pump($client, $server);
+    }
+
+    is($sent, 1025, 'all test DATAGRAMs entered the bounded sender');
+
+    is(
+        $server_connection->datagram_receive_drops,
+        1,
+        'one DATAGRAM is dropped after the receive count bound is full',
+    );
+
+    my $received = 0;
+    while (defined($server_connection->next_received_datagram)) {
+        ++$received;
+    }
+
+    is(
+        $received,
+        1024,
+        'receive fallback queue retains no more than its count bound',
+    );
+};
+
 subtest 'QUIC v2 datagram transport' => sub {
     my ($client, $server) = make_pair(
         client_port => 40603,

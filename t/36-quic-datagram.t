@@ -135,8 +135,10 @@ subtest 'bidirectional RFC 9221 datagrams' => sub {
         65535,
         'client sees server DATAGRAM receive size',
     );
-    ok($client_connection->datagram_supported, 'client sees peer support');
-    ok($server_connection->datagram_supported, 'server sees peer support');
+    ok($client_connection->can_send_datagram, 'client can send DATAGRAM');
+    ok($client_connection->can_receive_datagram, 'client can receive DATAGRAM');
+    ok($server_connection->can_send_datagram, 'server can send DATAGRAM');
+    ok($server_connection->can_receive_datagram, 'server can receive DATAGRAM');
 
     ok(
         $client_connection->send_datagram('client-one'),
@@ -212,11 +214,11 @@ subtest 'one-way negotiation and limits' => sub {
     my $client_connection = $client->connection;
 
     ok(
-        $client_connection->datagram_supported,
+        $client_connection->can_send_datagram,
         'client can send because server advertised DATAGRAM support',
     );
     ok(
-        !$server_connection->datagram_supported,
+        !$server_connection->can_send_datagram,
         'server cannot send because client did not advertise support',
     );
 

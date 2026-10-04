@@ -86,6 +86,8 @@ struct net_quic_application_datagram {
 
 #define NET_QUIC_DATAGRAM_RX_BUFFER_LIMIT (256u * 1024u)
 #define NET_QUIC_DATAGRAM_RX_COUNT_LIMIT 1024u
+#define NET_QUIC_1RTT_AEAD_OVERHEAD 16u
+#define NET_QUIC_MAX_PKT_NUMLEN 4u
 
 #define NET_QUIC_STREAM_AVAILABLE_BIDI 0x01u
 #define NET_QUIC_STREAM_AVAILABLE_UNI  0x02u
@@ -291,6 +293,58 @@ net_quic_datagram_payload_fits(uint64_t max_frame_size, size_t datalen)
     }
 
     return payload <= max_frame_size - overhead;
+}
+
+static size_t
+net_quic_max_datagram_payload_size(net_quic_connection *ep)
+{
+    const ngtcp2_transport_params *params;
+    const ngtcp2_cid *dcid;
+    uint64_t path_max;
+    uint64_t packet_overhead;
+    uint64_t frame_limit;
+    uint64_t candidate;
+
+    params = ngtcp2_conn_get_remote_transport_params2(ep->conn);
+    if (params == NULL || params->max_datagram_frame_size == 0) {
+        return 0;
+    }
+
+    dcid = ngtcp2_conn_get_dcid(ep->conn);
+    path_max = ngtcp2_conn_get_path_max_tx_udp_payload_size2(ep->conn);
+
+    packet_overhead =
+        1u +
+        (uint64_t)dcid->datalen +
+        NET_QUIC_MAX_PKT_NUMLEN +
+        NET_QUIC_1RTT_AEAD_OVERHEAD;
+
+    if (path_max <= packet_overhead) {
+        return 0;
+    }
+
+    frame_limit = path_max - packet_overhead;
+    candidate = params->max_datagram_frame_size < frame_limit
+        ? params->max_datagram_frame_size
+        : frame_limit;
+
+    if (candidate > (uint64_t)SIZE_MAX) {
+        candidate = (uint64_t)SIZE_MAX;
+    }
+
+    while (candidate != 0 &&
+           (!net_quic_datagram_payload_fits(
+                params->max_datagram_frame_size,
+                (size_t)candidate
+            ) ||
+            !net_quic_datagram_payload_fits(
+                frame_limit,
+                (size_t)candidate
+            ))) {
+        --candidate;
+    }
+
+    return (size_t)candidate;
 }
 
 static int

@@ -285,6 +285,7 @@ Net::QUIC also supports:
     server preferred addresses
     PMTU discovery
     ECN
+    QUIC DATAGRAM (RFC 9221)
 
 These features are documented in L<Net::QUIC::Connection>,
 L<Net::QUIC::Endpoint>, and the main README.

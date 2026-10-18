@@ -1,5 +1,48 @@
 # Net::QUIC handoff
 
+## Final verified standalone flow-control / fairness checkpoint (2026-10-18)
+
+Net::QUIC remains a reusable QUIC transport library without any HTTP3,
+Unblock or event-loop dependencies. Public Stream->send_some($bytes)
+keeps all preexisting default behavior; new optional
+send_some($bytes, limit_to_credit => 1) avoids retaining bytes beyond
+current peer stream/connection flow credit. The transmit queue remains
+bounded by the existing Connection->send_buffer_limit; accepted prefixes
+must never be retried. All original t/32 bounded TX assertions remain.
+
+The crucial **internal** generic fairness fix is targeted wakeup of
+capacity-waiting Streams on sibling ACKs. Native Stream tx_waiting_capacity
+flags are set only after a short send_some acceptance and removed on
+successful subsequent full admission or stream cleanup. Connection keeps
+one waiter count to avoid scanning the stream list in the common case.
+When ACK releases shared transmit bytes, the existing on_stream_activity /
+next_active_stream_id callback path receives those waiting Stream IDs.
+No per-ACK broadcast to all Streams, spin loop, or H3-specific callback.
+The standalone t/37-credit-limited-send.t proves wakeup of a third Stream
+with no queued bytes on sibling ACK, normal old send semantics, byte order,
+flow-credit updates and queue accounting.
+
+Transient _debug_send_credit XSUB was removed in feature commit
+4d3a45aa2d3efb27523c6733c71d31cf527130a8. Final clean code
+CI 39147484627 PASSED all 15 jobs across Linux Perl 5.20-5.44,
+macOS 5.44 and Windows 5.44. README documents default/optional modes
+(commit a69b4acababde987f47e2b399828683adb2b2231).
+
+Coordinated H3 branch uses only opt-in mode inside its QUIC output bridge
+and CI pins NetQUIC clean commit. H3 clean feature CI 39147558339
+PASSED. Upper feature's real QUIC six-stream test PASSED CI
+39147266161 before removal of debug and 39147574565 after final
+cleanup: 13 live files/686 checks, 13 dist files/552 checks and
+additional 64/58 budget checks plus benchmark smoke configurations PASS.
+The upper six-stream test demands six 1 MiB bodies and a fast response
+without cancellation; no assertions were weakened.
+
+No main modification, merge, release, tag or version bump. The feature
+requires coordinated dependency release/versioning before CPAN use;
+version changes are not yet authorized. The code is confined to
+feature/fair-stream-send-capacity (NetQUIC), feature/unified-receive-lifecycle
+(H3), and feature/high-level-client-server (unified).
+
 ## Shared-capacity wakeup refinement (2026-10-18)
 
 The upper six-reader live run 39146828753 confirmed the precise remaining

@@ -1,5 +1,38 @@
 # Net::QUIC handoff
 
+## Shared-capacity wakeup refinement (2026-10-18)
+
+The upper six-reader live run 39146828753 confirmed the precise remaining
+failure after opt-in flow credit: stream send buffer was 0, conn MAX_DATA
+remaining 261956, each blocked stream MAX_STREAM_DATA remaining about
+32743-32763, and 0 unsent bytes. Yet four H3 native output streams
+8,12,16,20 were marked blocked after their initial partial writes.
+Two sibling streams finished their full 1 MiB payloads. There was no
+Net::QUIC activity event sent to the blocked siblings as other streams'
+ACKs released the connection-wide transmit buffer.
+
+Transport-neutral fix now tracks native Stream tx_waiting_capacity ONLY
+when send_some accepts fewer bytes than requested (works for both default
+and opt-in). A connection-level waiter count avoids scanning streams if
+nobody is waiting. ACK release of previously retained send buffers wakes
+ONLY these waiter Stream IDs through the existing coalesced
+Connection->on_stream_activity / next_active_stream_id contract. No
+broadcast of all streams, no automatic producer retries, no HTTP concepts,
+no changed user callback signatures, no default send_some change.
+Waiters clear on subsequent full acceptance or native stream teardown.
+
+Code commits a3fa2a66546adba8dd853070f5d1121f58fd643b,
+5ed667e33e99dff4727873b1d6ae03aad913c349,
+fcb62f70a8536120d60d18823d600d3f73585176;
+standalone t/37 now explicitly proves a third Stream with zero queued
+bytes wakes when sibling ACK releases the shared buffer, regression commit
+4b6dc21511ea32a275da99a36a1de2fe9bf4317a.
+Net::QUIC CI run 39147248665 is in progress; upper six-Reader CI run
+39147266161 pins this exact Net::QUIC feature revision. Do not declare
+fixed until both pass. Diagnostics include private _debug_send_credit
+XS accessor, added transiently for the investigation; remove before any
+merge/release preparation, then retest the final source. No main changed.
+
 ## Standalone credit-aware bounded sends (2026-10-18)
 
 CURRENT FEATURE BRANCH: feature/fair-stream-send-capacity.

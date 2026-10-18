@@ -1466,6 +1466,35 @@ _send_buffered_bytes(self)
     OUTPUT:
         RETVAL
 
+/* Feature-branch diagnostic only: internal QUIC credit in terms of
+ * currently sendable bytes, plus not-yet-handed-off queue lengths.
+ * Not part of the public Net::QUIC API.
+ */
+SV *
+_debug_send_credit(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            av = newAV();
+            av_push(av, newSVuv((UV)ngtcp2_conn_get_max_data_left2(ep->conn)));
+            av_push(av, newSVuv((UV)ngtcp2_conn_get_max_stream_data_left2(ep->conn, stream->id)));
+            av_push(av, newSVuv((UV)(stream->tx_next_offset - stream->tx_sent_offset)));
+            av_push(av, newSVuv((UV)ep->stream_tx_unsent_bytes));
+            av_push(av, newSVuv((UV)ep->stream_tx_buffered_bytes));
+            RETVAL = newRV_noinc((SV *)av);
+        }
+    OUTPUT:
+        RETVAL
+
 SV *
 _stream_tx_stats(self, stream_id_iv)
     SV *self

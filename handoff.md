@@ -1,3 +1,42 @@
+## MAX_DATA credit wakeup feature verified, receive-budget root separated (2026-10-18)
+
+Net::QUIC 0.05 main and published GitHub/CPAN release are unchanged.
+The current clean, unreleased feature/connection-max-data-wakeup code head
+1606308eeeaf29f2601fa166046703a4b4ba9491 passed full GitHub
+Actions 39161007332 (15/15 Linux Perl 5.20-5.44, macOS and Windows).
+t/38-max-data-wakeup.t was first verified RED on unmodified 0.05:
+a Stream with no in-flight bytes received no generic wakeup when peer
+connection-wide MAX_DATA expanded. It is GREEN with the tiny QUIC.xs
+change, which reuses only registered capacity waiters and takes a credit
+snapshot only when activity tracking and short-acceptance waiters exist.
+No new public API, ABI, HTTP dependency or default send_some behavior.
+Temporary _debug_send_credit was removed before clean CI.
+
+The original upper HTTP3 12-producer tight receive-window failure was
+a separate root cause. Native diagnostics on an earlier, discarded
+instrumentation commit showed MAX_DATA left=0, 12 registered waiters and
+usable Stream0 credit, i.e. no additional connection send credit existed
+to wake for. With eleven sibling Readers holding ~32 KiB each, the
+448-KiB aggregate receive window left too little progress space for
+ngtcp2's delayed MAX_DATA update threshold. The upper test now uses
+explicit bounded aggregate credit with enough headroom: original six
+1-MiB producers use 256 KiB, 12 use 512 KiB, 16 use 1 MiB. Stream
+receive windows stay 32 KiB; native HTTP3 producer send budget stays
+8192 bytes. Original six-producer assertions are unchanged.
+
+UPPER INTEGRATION FULLY PASS on PUBLISHED CPAN Net::QUIC 0.05 in
+GitHub Actions 39161358835 (source upper fccde28c8cc330d29101c386408525d8d00d6616).
+All distribution and live TCP/QUIC tests, 6/12/16 producer variants
+with valid connection windows, and profiler smokes passed.
+Independent NET::QUIC FEATURE-pinned upper integration 39161358785
+ALSO PASSED with the above clean standalone feature. Thus HTTP3 0.13
+does not require publishing this Net::QUIC change first; the generic
+MAX_DATA wake improvement may be released separately when approved.
+
+Documentation now explains receive-window headroom in Endpoint POD.
+Do not merge to main, tag, bump the 0.05 version or publish this feature
+without explicit authorization. All versions and main refs untouched.
+
 ## Cleanup of temporary MAX_DATA diagnostics (2026-10-18)
 
 Standalone credit-wakeup test t/38 is confirmed to fail on the original

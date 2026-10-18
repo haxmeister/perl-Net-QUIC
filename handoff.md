@@ -1,5 +1,140 @@
 # Net::QUIC handoff
 
+## Final verified standalone flow-control / fairness checkpoint (2026-10-18)
+
+Net::QUIC remains a reusable QUIC transport library without any HTTP3,
+Unblock or event-loop dependencies. Public Stream->send_some($bytes)
+keeps all preexisting default behavior; new optional
+send_some($bytes, limit_to_credit => 1) avoids retaining bytes beyond
+current peer stream/connection flow credit. The transmit queue remains
+bounded by the existing Connection->send_buffer_limit; accepted prefixes
+must never be retried. All original t/32 bounded TX assertions remain.
+
+The crucial **internal** generic fairness fix is targeted wakeup of
+capacity-waiting Streams on sibling ACKs. Native Stream tx_waiting_capacity
+flags are set only after a short send_some acceptance and removed on
+successful subsequent full admission or stream cleanup. Connection keeps
+one waiter count to avoid scanning the stream list in the common case.
+When ACK releases shared transmit bytes, the existing on_stream_activity /
+next_active_stream_id callback path receives those waiting Stream IDs.
+No per-ACK broadcast to all Streams, spin loop, or H3-specific callback.
+The standalone t/37-credit-limited-send.t proves wakeup of a third Stream
+with no queued bytes on sibling ACK, normal old send semantics, byte order,
+flow-credit updates and queue accounting.
+
+Transient _debug_send_credit XSUB was removed in feature commit
+4d3a45aa2d3efb27523c6733c71d31cf527130a8. Final clean code
+CI 39147484627 PASSED all 15 jobs across Linux Perl 5.20-5.44,
+macOS 5.44 and Windows 5.44. README documents default/optional modes
+(commit a69b4acababde987f47e2b399828683adb2b2231).
+
+Coordinated H3 branch uses only opt-in mode inside its QUIC output bridge
+and CI pins NetQUIC clean commit. H3 clean feature CI 39147558339
+PASSED. Upper feature's real QUIC six-stream test PASSED CI
+39147266161 before removal of debug and 39147574565 after final
+cleanup: 13 live files/686 checks, 13 dist files/552 checks and
+additional 64/58 budget checks plus benchmark smoke configurations PASS.
+The upper six-stream test demands six 1 MiB bodies and a fast response
+without cancellation; no assertions were weakened.
+
+No main modification, merge, release, tag or version bump. The feature
+requires coordinated dependency release/versioning before CPAN use;
+version changes are not yet authorized. The code is confined to
+feature/fair-stream-send-capacity (NetQUIC), feature/unified-receive-lifecycle
+(H3), and feature/high-level-client-server (unified).
+
+## Shared-capacity wakeup refinement (2026-10-18)
+
+The upper six-reader live run 39146828753 confirmed the precise remaining
+failure after opt-in flow credit: stream send buffer was 0, conn MAX_DATA
+remaining 261956, each blocked stream MAX_STREAM_DATA remaining about
+32743-32763, and 0 unsent bytes. Yet four H3 native output streams
+8,12,16,20 were marked blocked after their initial partial writes.
+Two sibling streams finished their full 1 MiB payloads. There was no
+Net::QUIC activity event sent to the blocked siblings as other streams'
+ACKs released the connection-wide transmit buffer.
+
+Transport-neutral fix now tracks native Stream tx_waiting_capacity ONLY
+when send_some accepts fewer bytes than requested (works for both default
+and opt-in). A connection-level waiter count avoids scanning streams if
+nobody is waiting. ACK release of previously retained send buffers wakes
+ONLY these waiter Stream IDs through the existing coalesced
+Connection->on_stream_activity / next_active_stream_id contract. No
+broadcast of all streams, no automatic producer retries, no HTTP concepts,
+no changed user callback signatures, no default send_some change.
+Waiters clear on subsequent full acceptance or native stream teardown.
+
+Code commits a3fa2a66546adba8dd853070f5d1121f58fd643b,
+5ed667e33e99dff4727873b1d6ae03aad913c349,
+fcb62f70a8536120d60d18823d600d3f73585176;
+standalone t/37 now explicitly proves a third Stream with zero queued
+bytes wakes when sibling ACK releases the shared buffer, regression commit
+4b6dc21511ea32a275da99a36a1de2fe9bf4317a.
+Net::QUIC CI run 39147248665 is in progress; upper six-Reader CI run
+39147266161 pins this exact Net::QUIC feature revision. Do not declare
+fixed until both pass. Diagnostics include private _debug_send_credit
+XS accessor, added transiently for the investigation; remove before any
+merge/release preparation, then retest the final source. No main changed.
+
+## Standalone credit-aware bounded sends (2026-10-18)
+
+CURRENT FEATURE BRANCH: feature/fair-stream-send-capacity.
+Started from main 566366819b21c30e449bf13f55ec1d6ebfc5de64.
+User explicitly authorized modifications to Net::QUIC on a feature branch,
+subject to the requirement that Net::QUIC remain a viable standalone QUIC
+transport library, independent of HTTP/3, Unblock, and all event loops.
+Do not edit main, release, tag, or bump a version.
+
+The upper Unblock::HTTP six-producer stress regression uncovered a true
+bounded-buffer starvation: many streams had data retained beyond peer QUIC
+send credit and filled the 8192-byte Net::QUIC connection TX queue, so
+other streams could not enqueue their next data even when their peer had
+remaining receive credit. This is a generic multiplexed transport issue,
+not an HTTP/3-specific rule. The initial H3 ACK retry experiment was
+reverted because it regressed existing tests and did not resolve the stall.
+
+Net::QUIC's established Stream->send_some($bytes) semantics remain 100%
+unchanged by default, including its intentional acceptance of unsendable
+bytes beyond current peer flow-control windows. t/32-bounded-tx.t remains
+unchanged. The OPTIONAL named per-call argument
+Stream->send_some($bytes, limit_to_credit => 1) additionally limits new
+acceptance to (1) the configured hard connection queue bound, (2) peer
+stream MAX_STREAM_DATA credit, and (3) peer connection MAX_DATA credit,
+subtracting bytes already queued but not yet handed to ngtcp2. This avoids
+one uncredited stream consuming another stream's reserved send memory.
+No extra protocol classes, event-loop hooks, or default API behavior.
+
+The XS maintains stream tx_sent_offset and connection
+stream_tx_unsent_bytes to account for not-yet-sent bytes. It releases this
+accounting on ACK, reset and stream teardown. Existing
+Connection->on_stream_activity() now receives generic peer stream credit
+increases via ngtcp2 extend_max_stream_data, allowing independent producers
+to retry without inventing polling. Data/FIN integrity still follows ngtcp2.
+
+Commits: bb24b3b43f6a1bfc5a1a27ebde7c056ce14f6d3c,
+76e8b9be0bc37f8fbbed5245e4c71299058f153b,
+a819a4d7bb99c51cfa699b6966ea44444fe02196,
+1e5f1f59e314cca16691f7befd76d9f37764c8f1,
+new test cd5e0da894058b0317885d9a3da5d0c3e557c77c,
+corrected regression be0ceecbaa88a6d8100459642a018b8eefba8e56.
+The dedicated new test t/37-credit-limited-send.t uses ONLY Net::QUIC and
+a paired in-process UDP QUIC transport. It confirms no over-admission,
+independent siblings, the MAX_STREAM_DATA event, exact payload, and that
+ordinary send_some still queues beyond peer credit when not opted in.
+
+NET::QUIC FEATURE CI RUN 39146133370 **PASSED all 15 jobs**:
+Linux Perl 5.20 through 5.44, Windows Perl 5.44, macOS Perl 5.44,
+event-loop examples and distribution smoke. Do not interpret test counts
+as benchmarks. This change is deliberately additive and transport-neutral.
+
+Coordinated H3 feature commit 9d329e2adb64e0a71d58ee549f947b8972190d18
+uses limit_to_credit => 1 only in its own QUIC send bridge, and its
+feature workflows pin this Net::QUIC commit. The upper Unblock::HTTP CI
+is running the genuine six-producer scenario against these exact feature
+heads (upper workflow pin commit 1e51e2d59847c3d6fa87c1cc7c82ad3a8cf87554,
+CI run 39146210996; check completion). Net::QUIC's independent utility
+must remain the governing design constraint for further changes.
+
 ## Current state
 
 Current branch:

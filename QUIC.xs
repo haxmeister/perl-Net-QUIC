@@ -1466,10 +1466,6 @@ _send_buffered_bytes(self)
     OUTPUT:
         RETVAL
 
-/* Feature-branch diagnostic only: internal QUIC credit in terms of
- * currently sendable bytes, plus not-yet-handed-off queue lengths.
- * Not part of the public Net::QUIC API.
- */
 SV *
 _debug_send_credit(self, stream_id_iv)
     SV *self

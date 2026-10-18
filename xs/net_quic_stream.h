@@ -586,6 +586,10 @@ net_quic_stream_free_tx(
     stream->tx_buffered_bytes = 0;
     ep->stream_tx_buffered_bytes -= released;
     ep->stream_tx_unsent_bytes -= unsent;
+    if (released != 0 && ep->stream_tx_buffer_limit_enabled &&
+        ep->stream_tx_buffered_bytes < ep->stream_tx_buffer_limit) {
+        net_quic_stream_wake_capacity_waiters(ep);
+    }
 }
 
 static void

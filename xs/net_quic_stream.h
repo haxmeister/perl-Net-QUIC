@@ -50,6 +50,7 @@ struct net_quic_stream_state {
     int local_stop_sending;
     uint64_t local_stop_sending_code;
     int tx_discard_pending;
+    int tx_waiting_capacity;
     int rx_mode;
     uint64_t rx_unconsumed;
     uint64_t rx_next_offset;
@@ -276,6 +277,44 @@ net_quic_stream_mark_activity(
     }
 
     ep->stream_activity_tail = stream;
+}
+
+/* Keep waiters separate from ordinary ACK activity. A Stream which could
+ * not enqueue its next bytes may have no local QUIC packet to acknowledge,
+ * so another Stream returning shared queue capacity must wake it.
+ */
+static void
+net_quic_stream_set_capacity_waiter(
+    net_quic_connection *ep,
+    net_quic_stream_state *stream,
+    int waiting
+)
+{
+    if (!!stream->tx_waiting_capacity == !!waiting) {
+        return;
+    }
+    stream->tx_waiting_capacity = waiting ? 1 : 0;
+    if (waiting) {
+        ++ep->stream_tx_capacity_waiters;
+    } else {
+        --ep->stream_tx_capacity_waiters;
+    }
+}
+
+static void
+net_quic_stream_wake_capacity_waiters(net_quic_connection *ep)
+{
+    net_quic_stream_state *stream;
+
+    if (!ep->stream_tx_capacity_waiters || !ep->stream_activity_enabled) {
+        return;
+    }
+    for (stream = ep->streams; stream != NULL; stream = stream->next) {
+        if (stream->tx_waiting_capacity &&
+            !stream->write_shutdown && !stream->closed) {
+            net_quic_stream_mark_activity(ep, stream);
+        }
+    }
 }
 
 static void
@@ -534,6 +573,8 @@ net_quic_stream_free_tx(
     net_quic_stream_tx_chunk *next;
     uint64_t released = stream->tx_buffered_bytes;
     uint64_t unsent = stream->tx_next_offset - stream->tx_sent_offset;
+
+    net_quic_stream_set_capacity_waiter(ep, stream, 0);
 
     for (chunk = stream->tx_head; chunk != NULL; chunk = next) {
         next = chunk->next;
@@ -1143,6 +1184,7 @@ net_quic_stream_release_acked(
 {
     net_quic_stream_tx_chunk *chunk;
     uint64_t end;
+    uint64_t buffered_before = ep->stream_tx_buffered_bytes;
 
     while ((chunk = stream->tx_head) != NULL) {
         if (chunk->fin && chunk->len == 0) {
@@ -1167,6 +1209,11 @@ net_quic_stream_release_acked(
         stream->tx_buffered_bytes -= (uint64_t)chunk->len;
         ep->stream_tx_buffered_bytes -= (uint64_t)chunk->len;
         net_quic_stream_tx_chunk_free(aTHX_ chunk);
+    }
+    if (ep->stream_tx_buffer_limit_enabled &&
+        ep->stream_tx_buffered_bytes < buffered_before &&
+        ep->stream_tx_buffered_bytes < ep->stream_tx_buffer_limit) {
+        net_quic_stream_wake_capacity_waiters(ep);
     }
 }
 

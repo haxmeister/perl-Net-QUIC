@@ -58,7 +58,7 @@ is($got, 'A' x 2048, 'explicit Reader holds original payload');
 is($txconn->send_buffered_bytes, 0, 'no transmit bytes awaiting ACK');
 while (defined($txconn->next_active_stream_id)) {}
 my $before = $calls;
-$rx{$a->id}->consume(1024);
+$rx{$a->id}->consume(2048);
 my $woke;
 for (1 .. 1000) {
     pump();

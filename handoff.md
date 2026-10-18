@@ -1,3 +1,43 @@
+## Connection-wide MAX_DATA wakeup investigation (2026-10-18)
+
+Branch: feature/connection-max-data-wakeup, starting from released Net::QUIC
+0.05 main beca1afdbc49e64a54827cd3118270e98469b0f7. Main, tags and
+released 0.05 are untouched. No version bump, merge or release authorized.
+
+Motivation: upper HTTP3 real-QUIC 12-producer regression passed with 32 MiB
+connection receive window and failed with a 458752-byte window despite
+independent stream credit, correct native stream scheduling and empty QUIC
+transmit buffer. Generic connection-level MAX_DATA credit did not trigger
+activity for send_some(..., limit_to_credit => 1) short-acceptance waiters.
+
+A standalone, HTTP-free, event-loop-free regression is added in
+t/38-max-data-wakeup.t and MANIFEST. It uses two native QUIC streams and a
+2048-byte peer MAX_DATA window, with an 8192-byte individual stream window.
+Stream A fills MAX_DATA and is fully ACKed; Stream B accepts zero bytes
+and has nothing in flight to ACK. After A returns receive credit, B must
+appear in next_active_stream_id and complete its payload unchanged.
+
+The test-only commits 9dc781d52c91db126504c67258c3098a00e9dbdc
+through 88df08c1165f360d84f42076b8decf82608ad399 FAILED in CI on
+Linux, macOS and Windows at the new wakeup assertion (and callback
+notification assertion), while manual send_some after credit did succeed.
+This proves the missing event independently of HTTP3.
+
+A minimal experimental fix in QUIC.xs commit
+eaa42e47820c99b4e056ea58aa044651ab9b925e snapshots the existing
+ngtcp2_conn_get_max_data_left2() value before reading an incoming packet
+and wakes ONLY registered tx_waiting_capacity Streams when connection-wide
+credit increases. It uses the established coalesced on_stream_activity /
+next_active_stream_id API. No new callback, public ABI, API argument, send
+semantics, packet timer, event-loop or HTTP dependency. Test pump now
+handles native endpoint timeouts (ff232f11af1c90ef78eebd1f58f8ea925615f5cb).
+Connection POD clarified this behavior.
+
+Pending: full feature CI on all 15 jobs; then independent high-concurrency
+HTTP3 tight-window regression using this Net::QUIC feature pinned in upper
+test harness. The released CPAN 0.05 install must remain a valid baseline.
+Do not merge, tag, version-bump or release without explicit approval.
+
 # Net::QUIC handoff
 
 ## Net::QUIC 0.05 release candidate on main (2026-10-18)

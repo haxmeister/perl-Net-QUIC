@@ -85,8 +85,21 @@ sub send_some {
     croak "cannot send on this unidirectional QUIC stream"
         if !$self->can_send;
 
-    my $accepted =
-        $self->{connection}->_stream_send_some($self->{id}, $bytes);
+    # Default behavior is deliberately unchanged: a bounded send may queue
+    # data beyond the peer's flow-control window. The optional mode prevents
+    # new queued bytes from occupying capacity needed by writable siblings.
+    my $credit_limited = 0;
+    if (@_ > 2) {
+        croak "send_some option must be limit_to_credit => 0 or 1"
+            unless @_ == 4 && $_[2] eq 'limit_to_credit'
+                && defined($_[3]) && !ref($_[3])
+                && $_[3] =~ /\A[01]\z/;
+        $credit_limited = $_[3] ? 1 : 0;
+    }
+
+    my $accepted = $self->{connection}->_stream_send_some(
+        $self->{id}, $bytes, $credit_limited,
+    );
 
     $self->{connection}->_notify_output if $accepted;
     return $accepted;
@@ -324,6 +337,9 @@ acceptance is wanted.
 =head2 send_some
 
     my $accepted = $stream->send_some($bytes);
+    my $credited = $stream->send_some(
+        $bytes, limit_to_credit => 1,
+    );
 
 Advanced bounded transmit interface.
 
@@ -336,6 +352,19 @@ connection-wide buffer is full.
 
 The caller retains ownership only of bytes that were not accepted and may
 release or reuse the accepted input after this method returns.
+
+By default C<send_some> may queue bytes beyond current peer stream and
+connection flow-control credit. This is the existing behavior, including
+when only part of the input fits the configured send buffer.
+
+The optional C<limit_to_credit =E<gt> 1> additionally restricts new
+acceptance to the currently available peer stream and connection send
+credit, after accounting for bytes already queued but not yet handed to
+ngtcp2. This avoids retaining unsendable bytes that could exhaust shared
+transmit capacity while other streams have receive credit. This option is
+transport-neutral and useful to multiplexing protocol implementers. It does
+not reserve congestion-window capacity or guarantee remote consumption.
+The option changes only that individual call; the default remains unchanged.
 
 When C<send_some> accepts fewer bytes than requested, pause the producer.
 L<Net::QUIC::Connection/on_stream_activity> wakes protocol engines when ACK or

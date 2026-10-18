@@ -1529,6 +1529,35 @@ _stream_send(self, stream_id_iv, data_sv)
             croak("unable to queue QUIC stream data: %s", ngtcp2_strerror(rv));
         }
 
+/* Temporary feature-branch diagnostic. Remove before release. */
+SV *
+_debug_send_credit(self, stream_id_iv)
+    SV *self
+    IV stream_id_iv
+    PREINIT:
+        net_quic_connection *ep;
+        net_quic_stream_state *stream;
+        AV *av;
+    CODE:
+        ep = net_quic_connection_from_sv(self);
+        stream = net_quic_stream_find(ep, (int64_t)stream_id_iv);
+        if (stream == NULL) {
+            RETVAL = &PL_sv_undef;
+        } else {
+            av = newAV();
+            av_push(av, newSVuv((UV)ngtcp2_conn_get_max_data_left2(ep->conn)));
+            av_push(av, newSVuv((UV)ngtcp2_conn_get_max_stream_data_left2(ep->conn, stream->id)));
+            av_push(av, newSVuv((UV)(stream->tx_next_offset - stream->tx_sent_offset)));
+            av_push(av, newSVuv((UV)ep->stream_tx_unsent_bytes));
+            av_push(av, newSVuv((UV)ep->stream_tx_buffered_bytes));
+            av_push(av, newSViv(stream->tx_waiting_capacity ? 1 : 0));
+            av_push(av, newSVuv((UV)ep->stream_tx_capacity_waiters));
+            av_push(av, newSViv(ep->stream_activity_enabled ? 1 : 0));
+            RETVAL = newRV_noinc((SV *)av);
+        }
+    OUTPUT:
+        RETVAL
+
 UV
 _stream_send_some(self, stream_id_iv, data_sv, credit_limited = 0)
     SV *self

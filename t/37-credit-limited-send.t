@@ -71,6 +71,8 @@ ok($client->connection->ready, 'client QUIC handshake ready');
 
 my $connection = $client->connection;
 $connection->send_buffer_limit(2048);
+my $capacity_wake_calls = 0;
+$connection->on_stream_activity(sub { $capacity_wake_calls++ });
 my @tx = map { $connection->open_bidi_stream } 1 .. 3;
 my %rx;
 my @bytes = ('', '', '');
@@ -105,6 +107,13 @@ for (1 .. 1000) {
 is($bytes[0], 'A' x 1024, 'first receiver gets exact credited prefix');
 is($bytes[1], 'B' x 1024, 'second receiver gets exact credited prefix');
 is($connection->send_buffered_bytes, 0, 'ACKs release bounded send memory');
+my @capacity_woken;
+while (defined(my $id = $connection->next_active_stream_id)) {
+    push @capacity_woken, $id;
+}
+ok(scalar(grep { $_ == $tx[2]->id } @capacity_woken),
+    'a Stream with no queued bytes is awakened by a sibling ACK freeing capacity');
+ok($capacity_wake_calls > 0, 'shared capacity wake uses the existing activity callback');
 
 is($tx[0]->send_some('D' x 1024, limit_to_credit => 1), 0,
     'consumed send credit is not counted a second time');

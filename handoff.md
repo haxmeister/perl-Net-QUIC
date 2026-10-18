@@ -1,3 +1,24 @@
+## Cleanup of temporary MAX_DATA diagnostics (2026-10-18)
+
+Standalone credit-wakeup test t/38 is confirmed to fail on the original
+0.05 transport (no short-acceptance wake), and passes with the generic
+QUIC.xs update on all 15 jobs, run 39160112535. The temporary
+_debug_send_credit XSUB was used on a diagnostic feature commit and
+removed here; it must not enter a public release. The production hot path
+now snapshots MAX_DATA only when coalesced activity tracking is enabled
+and at least one short-accepted Stream is waiting.
+
+Upper HTTP3 pressure diagnostics on the temporary source demonstrate a
+separate possible receiver-side aggregate credit update threshold:
+12-stream tight connection_window=458752 holds, QUIC connection send
+credit=0, 12 capacity waiters registered, Stream0 still has individual
+credit. A test of larger, bounded connection windows is pending in the
+upper feature branch. Do not confuse that condition with the standalone
+MAX_DATA callback gap, which is independently fixed here.
+
+No Net::QUIC main change, tag, version bump or release. This clean feature
+head must pass CI before integration pins are updated.
+
 ## Connection-wide MAX_DATA wakeup investigation (2026-10-18)
 
 Branch: feature/connection-max-data-wakeup, starting from released Net::QUIC

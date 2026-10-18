@@ -1529,7 +1529,6 @@ _stream_send(self, stream_id_iv, data_sv)
             croak("unable to queue QUIC stream data: %s", ngtcp2_strerror(rv));
         }
 
-/* Temporary feature-branch diagnostic. Remove before release. */
 SV *
 _debug_send_credit(self, stream_id_iv)
     SV *self

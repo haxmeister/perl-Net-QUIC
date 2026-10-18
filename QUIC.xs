@@ -1626,6 +1626,13 @@ _stream_send_some(self, stream_id_iv, data_sv, credit_limited = 0)
             }
         }
 
+        /* A caller which received a short accepted prefix may have no
+         * QUIC stream bytes outstanding to ACK. Wake it when shared
+         * capacity returns on a sibling, not only on its own activity.
+         */
+        net_quic_stream_set_capacity_waiter(
+            ep, stream, accepted < (uint64_t)datalen
+        );
         RETVAL = (UV)accepted;
     OUTPUT:
         RETVAL

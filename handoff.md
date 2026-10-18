@@ -1,5 +1,36 @@
 # Net::QUIC handoff
 
+## Net::QUIC 0.05 release candidate on main (2026-10-18)
+
+APPROVED ACTION: User explicitly requested full release preparation and
+pushing Net::QUIC to main, first in the dependency stack. No GitHub tag,
+GitHub Release or CPAN upload was requested; NONE has been created.
+
+Main merge commit 4cacd14735ac08354682b7c6a589e9c4a9c500a8 merges
+PR #24 from feature/fair-stream-send-capacity. The merge includes 0.05
+version in all six indexed public modules, Changes 0.05 entry,
+README/Stream/Connection POD update, XS flow-credit send option and
+targeted ACK/RESET capacity wakeups, and the new t/37 standalone
+multi-stream regression recorded in MANIFEST. Build metadata still
+requires Alien::ngtcp2 >= 0.03 and Perl >= 5.20. Net::QUIC remains
+an event-loop-neutral transport library with no HTTP/Unblock dependency.
+
+Release-candidate head 6e32cdf3520c0e7ed9a5578c67c8986a7c1e8e34
+passed 15/15 Linux 5.20-5.44, macOS and Windows CI in
+GitHub Actions run 39150193271. Perl 5.44 reports public POD checks,
+event-loop example smoke tests, and **make disttest from Net-QUIC-0.05**:
+39 test files / 737 assertions PASS, including the new t/37 test.
+macOS old DATAGRAM suite did fail transiently in an earlier intermediate
+run 39150007298; final candidate run was fully green. No test skipped.
+Main branch CI 39150460674 was initiated by merge; verify its outcome.
+
+The existing feature/fair-stream-send-capacity, feature/quic-datagram
+and release/0.04 branches have zero commits ahead of main after merge,
+and are safe for the user to delete, but NO branches were deleted.
+Do not rewrite or force-push main. Other repositories were not changed
+by this release-prep activity. Releasing to PAUSE/GitHub, creating v0.05
+tag, and harmonizing downstream H3 CPAN prereqs are separate steps.
+
 ## Final verified standalone flow-control / fairness checkpoint (2026-10-18)
 
 Net::QUIC remains a reusable QUIC transport library without any HTTP3,

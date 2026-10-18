@@ -2338,6 +2338,7 @@ _receive_datagram(self, data_sv, local_sv, peer_sv, ecn_uv = 0)
         ngtcp2_pkt_info pi;
         ngtcp2_tstamp now;
         uint64_t send_credit_before;
+        int watch_credit;
         int rv;
     CODE:
         ep = net_quic_connection_from_sv(self);
@@ -2370,7 +2371,10 @@ _receive_datagram(self, data_sv, local_sv, peer_sv, ecn_uv = 0)
          * ngtcp2 exposes per-stream MAX_STREAM_DATA callbacks, but not a
          * corresponding callback for peer MAX_DATA increases.
          */
-        send_credit_before = ngtcp2_conn_get_max_data_left2(ep->conn);
+        watch_credit = ep->stream_activity_enabled &&
+                       ep->stream_tx_capacity_waiters != 0;
+        send_credit_before = watch_credit
+            ? ngtcp2_conn_get_max_data_left2(ep->conn) : 0;
         now = net_quic_now();
         rv = ngtcp2_conn_read_pkt(
             ep->conn,
@@ -2394,7 +2398,7 @@ _receive_datagram(self, data_sv, local_sv, peer_sv, ecn_uv = 0)
          * do not wake every Stream or introduce a protocol-specific hook.
          * Only notify after ngtcp2_conn_read_pkt has returned.
          */
-        if (rv == 0 && ep->stream_tx_capacity_waiters != 0 &&
+        if (rv == 0 && watch_credit && ep->stream_tx_capacity_waiters != 0 &&
             ngtcp2_conn_get_max_data_left2(ep->conn) > send_credit_before) {
             net_quic_stream_wake_capacity_waiters(ep);
         }

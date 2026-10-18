@@ -3,6 +3,7 @@ use warnings;
 use FindBin ();
 use Socket qw(inet_aton pack_sockaddr_in);
 use Test2::V0;
+use Time::HiRes qw(sleep);
 use Net::QUIC::Endpoint;
 
 # This tests connection-wide QUIC send credit, with no HTTP dependency.
@@ -20,11 +21,30 @@ my $client = Net::QUIC::Endpoint->client(
     ca_file => "$FindBin::Bin/data/server-cert.pem",
 );
 sub pump {
+    my $progress = 0;
     while (my $d = $server->next_datagram) {
         $client->receive_datagram($d->data, $caddr, $saddr);
+        ++$progress;
     }
     while (my $d = $client->next_datagram) {
         $server->receive_datagram($d->data, $saddr, $caddr);
+        ++$progress;
+    }
+    my $server_after = $server->timeout_after;
+    if (defined($server_after) && $server_after <= 0) {
+        $server->handle_timeout;
+        ++$progress;
+    }
+    my $client_after = $client->timeout_after;
+    if (defined($client_after) && $client_after <= 0) {
+        $client->handle_timeout;
+        ++$progress;
+    }
+    if (!$progress) {
+        my @wait = sort { $a <=> $b }
+            grep { defined($_) && $_ > 0 }
+            ($server_after, $client_after);
+        sleep($wait[0] > .01 ? .01 : $wait[0] + .001) if @wait;
     }
 }
 my $rxconn;

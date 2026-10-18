@@ -6,7 +6,7 @@ use warnings;
 use Carp qw(croak);
 use Net::QUIC ();
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 sub _new {
     my ($class, $connection, $id, $local_initiated, $bidirectional) = @_;
@@ -348,7 +348,8 @@ L<Net::QUIC::Connection/send_buffer_limit> configured.
 
 Returns the number of prefix bytes copied into Net::QUIC-owned transmit
 memory. This can be zero or less than C<length($bytes)> when the configured
-connection-wide buffer is full.
+connection-wide buffer is full or, when C<limit_to_credit> is enabled, when
+peer stream or connection flow-control credit is unavailable.
 
 The caller retains ownership only of bytes that were not accepted and may
 release or reuse the accepted input after this method returns.
@@ -367,8 +368,11 @@ not reserve congestion-window capacity or guarantee remote consumption.
 The option changes only that individual call; the default remains unchanged.
 
 When C<send_some> accepts fewer bytes than requested, pause the producer.
-L<Net::QUIC::Connection/on_stream_activity> wakes protocol engines when ACK or
-other Stream progress can make more buffer space available.
+L<Net::QUIC::Connection/on_stream_activity> wakes protocol engines when
+ACKs or reset on another Stream free shared buffered capacity or when the
+peer grants more Stream flow-control credit. Drain
+L<Net::QUIC::Connection/next_active_stream_id> and retry only notified
+Streams. No polling loop is required.
 
 =head2 send_buffered_bytes
 

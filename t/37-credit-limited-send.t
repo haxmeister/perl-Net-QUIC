@@ -121,6 +121,8 @@ for (1 .. 1000) {
 is($bytes[2], 'C' x 1024,
     'flow blocked siblings do not prevent independent stream delivery');
 
+my $credit_wakes = 0;
+$connection->on_stream_activity(sub { $credit_wakes++ });
 while (defined($connection->next_active_stream_id)) {}
 $rx{$tx[0]->id}->consume(1024);
 my $saw_credit = 0;
@@ -144,6 +146,13 @@ is($bytes[0], ('A' x 1024) . ('D' x 1024),
     'credited stream resumes in exact byte order');
 
 # Original default remains intentionally different, even in this connection.
+# Wait for the prior credited write to be ACKed so the full hard limit is free.
+for (1 .. 1000) {
+    pump_pair();
+    $collect->();
+    last if $connection->send_buffered_bytes == 0;
+}
+is($connection->send_buffered_bytes, 0, 'prior credited bytes were ACKed');
 is($tx[1]->send_some('Z' x 2048), 2048,
     'default send_some still accepts data beyond peer flow credit');
 is($connection->send_buffered_bytes >= 2048, 1,

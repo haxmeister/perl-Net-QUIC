@@ -54,6 +54,7 @@ struct net_quic_stream_state {
     uint64_t rx_unconsumed;
     uint64_t rx_next_offset;
     uint64_t tx_next_offset;
+    uint64_t tx_sent_offset;
     uint64_t tx_acked_through;
     uint64_t tx_buffered_bytes;
     int fin_acked;
@@ -532,6 +533,7 @@ net_quic_stream_free_tx(
     net_quic_stream_tx_chunk *chunk;
     net_quic_stream_tx_chunk *next;
     uint64_t released = stream->tx_buffered_bytes;
+    uint64_t unsent = stream->tx_next_offset - stream->tx_sent_offset;
 
     for (chunk = stream->tx_head; chunk != NULL; chunk = next) {
         next = chunk->next;
@@ -542,6 +544,7 @@ net_quic_stream_free_tx(
     stream->tx_tail = NULL;
     stream->tx_buffered_bytes = 0;
     ep->stream_tx_buffered_bytes -= released;
+    ep->stream_tx_unsent_bytes -= unsent;
 }
 
 static void
@@ -848,6 +851,7 @@ net_quic_stream_queue_data(
     stream->tx_next_offset += (uint64_t)datalen;
     stream->tx_buffered_bytes += (uint64_t)datalen;
     ep->stream_tx_buffered_bytes += (uint64_t)datalen;
+    ep->stream_tx_unsent_bytes += (uint64_t)datalen;
 
     return 0;
 
@@ -1302,6 +1306,35 @@ net_quic_acked_stream_data_offset_cb(
 
     net_quic_stream_release_acked(aTHX_ ep, stream);
     if (changed) {
+        net_quic_stream_mark_activity(ep, stream);
+    }
+    return 0;
+}
+
+/* A peer MAX_STREAM_DATA update is a writable event even if the stream
+ * has no outstanding bytes to ACK. Expose it through existing generic
+ * per-stream activity, coalesced by the normal queue.
+ */
+static int
+net_quic_extend_max_stream_data_cb(
+    ngtcp2_conn *conn,
+    int64_t stream_id,
+    uint64_t max_data,
+    void *user_data,
+    void *stream_user_data
+)
+{
+    net_quic_connection *ep = (net_quic_connection *)user_data;
+    net_quic_stream_state *stream =
+        (net_quic_stream_state *)stream_user_data;
+
+    (void)conn;
+    (void)max_data;
+
+    if (stream == NULL) {
+        stream = net_quic_stream_find(ep, stream_id);
+    }
+    if (stream != NULL && net_quic_stream_can_send(stream)) {
         net_quic_stream_mark_activity(ep, stream);
     }
     return 0;

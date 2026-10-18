@@ -167,6 +167,21 @@ is($tx[1]->send_some('Z' x 2048), 2048,
 is($connection->send_buffered_bytes >= 2048, 1,
     'uncredited default bytes are retained under the existing contract');
 
+my $reset_waiter = $connection->open_bidi_stream;
+is($reset_waiter->send_some('Q' x 128, limit_to_credit => 1), 0,
+    'a fourth Stream waits for full shared buffer before reset');
+while (defined($connection->next_active_stream_id)) {}
+$tx[1]->reset(90);
+my @reset_woken;
+while (defined(my $id = $connection->next_active_stream_id)) {
+    push @reset_woken, $id;
+}
+ok(scalar(grep { $_ == $reset_waiter->id } @reset_woken),
+    'resetting sibling frees memory and wakes the waiting Stream');
+is($reset_waiter->send_some('Q' x 128, limit_to_credit => 1), 128,
+    'waiting Stream uses capacity released by sibling reset');
+$reset_waiter->reset(90);
+
 for my $stream (@tx) {
     $stream->reset(90);
 }

@@ -9,7 +9,7 @@ use Net::QUIC ();
 use Net::QUIC::Connection ();
 use Net::QUIC::Datagram ();
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 sub _transport_config {
     my ($class, $value) = @_;

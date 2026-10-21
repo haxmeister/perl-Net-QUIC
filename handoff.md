@@ -1,3 +1,17 @@
+## Net::QUIC 0.06 minor release preparation (2026-10-21)
+
+The user explicitly approved a coordinated release of updated Unblock HTTP
+family distributions including a minor Net::QUIC version bump.
+This release candidate bumps all six public Net::QUIC package versions
+from 0.05 to 0.06, adds a Changes entry for the self-contained MAX_DATA
+credit-wakeup fix, and preserves standalone QUIC use outside HTTP.
+No new HTTP dependency, callback, ABI, or public API is added.
+The feature source HEAD 4c715d5c1606dc260599657a45d882b00c68c256
+had passed full CI (15/15 jobs) in GitHub Actions run 39161907610.
+The version-bumped source must pass its own full CI, disttest, and
+PAUSE-indexable version audit before any merge/tag/release/CPAN upload.
+Main and the published 0.05 remain untouched while auditing.
+
 ## MAX_DATA credit wakeup feature verified, receive-budget root separated (2026-10-18)
 
 Net::QUIC 0.05 main and published GitHub/CPAN release are unchanged.

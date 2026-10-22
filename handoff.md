@@ -1,3 +1,62 @@
+# MAIN-BRANCH RELEASE HANDOFF: Net::QUIC 0.06
+Updated: 2026-10-21
+Repository: https://github.com/haxmeister/perl-Net-QUIC
+Current branch: main
+Feature branch integrated: feature/connection-max-data-wakeup
+Fast-forward merge checkpoint: bc4dcce3ac0bcfd19a4c442b4ed98cad3f9d5adb
+
+## Instructions for the next Net::QUIC-only conversation
+
+The user expressly authorized moving this feature branch to main. **That merge
+has happened.** Continue in this repository's own chat from MAIN and do not
+restart architectural discussions or redo earlier profiling campaigns.
+Current source package version is 0.06, prepared as the minor follow-up to
+published GitHub/CPAN version 0.05. Version bump and Changes are already
+committed to main. **A release/tag/PAUSE upload has NOT been performed.**
+Obtain the user's authorization before doing those release/publication actions.
+
+## What is implemented and why
+
+Net::QUIC must continue to be a fully standalone QUIC implementation that can
+be integrated into arbitrary event loops. It must NOT acquire a dependency on
+Unblock::HTTP, Linux::Event or any other event-loop framework. Its existing
+Driver/Endpoint/Connection/Stream, UDP handoff, and timeout contracts are
+preserved. The new change fixes a connection-wide MAX_DATA credit-wakeup hole:
+a stream producer with no in-flight data, blocked on connection-wide send
+credit, could remain asleep even after new MAX_DATA arrived because no stream
+ACK was forthcoming. The native code wakes registered capacity waiters using
+the existing on_stream_activity/next_active_stream_id API. It takes a send
+credit snapshot only when blocked producers are registered. No API/ABI
+breaking change, HTTP-specific code, or unnecessary fast-path work is
+intended. The targeted regression is t/38-max-data-wakeup.t.
+
+Importantly, a different apparent upper HTTP3 receive-window stall with
+multiple parallel streams was proven to be inadequate aggregate receive
+headroom, not this Net::QUIC wakeup bug. The upper-layer receive-window
+configuration was corrected separately; do not conflate these diagnoses.
+
+## Verified and next steps
+
+Full standalone GitHub Actions suite on the version-bumped release-candidate
+commit bc4dcce3ac0bcfd19a4c442b4ed98cad3f9d5adb:
+https://github.com/haxmeister/perl-Net-QUIC/actions/runs/39693427664
+**PASS (15 jobs across the supported Linux, macOS, Windows and Perl matrix).**
+Earlier MAX_DATA red/green proof and independent core tests are documented
+below. Net::QUIC 0.06 is on MAIN, but GitHub/CPAN publication remains pending.
+
+Next in the Net::QUIC project chat: inspect MAIN, Changes, Makefile.PL,
+MANIFEST, standalone POD/API examples and the installed package versions.
+Perform a focused release audit: clean disttest from the created 0.06 tarball,
+complete file/index version consistency, no unintentional HTTP dependencies,
+full portable/XS support, and whether current release instructions or docs
+need updates. Only then prepare the GitHub release notes/tag and PAUSE upload
+in the Net::QUIC chat when explicitly authorized. Do not modify the other
+repositories from this handoff. The broader planned order is Net::QUIC,
+then relevant lower HTTP engines, then unified Unblock::HTTP.
+
+## Earlier engineering notes (historical; this header supersedes old
+## "do not merge" and "version unchanged" instructions)
+
 ## Net::QUIC 0.06 minor release preparation (2026-10-21)
 
 The user explicitly approved a coordinated release of updated Unblock HTTP
